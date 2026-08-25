@@ -1,0 +1,15 @@
+{
+  "name": "tree-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generic schema-inferring JSON tree editor — shared engine, no bundled data.",
+  "exports": {
+    "./client": "./src/client/index.ts",
+    "./server": "./src/server/index.ts"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18",
+    "next": ">=13"
+  }
+}
