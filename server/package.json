@@ -1,0 +1,4 @@
+{
+  "main": "../src/server/index.ts",
+  "types": "../src/server/index.ts"
+}
