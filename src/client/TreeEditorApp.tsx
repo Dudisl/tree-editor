@@ -50,9 +50,11 @@ export type TreeEditorUiConfig = {
   // Arrays with these keys are "transparent": their items are hoisted directly
   // as children of the parent node instead of showing the array as an intermediate node.
   inlineKeys?: string[];
-  // Allowlist of array key names permitted to appear in the tree at all (hoisted
-  // or as their own node). Omit to allow every key — the original behavior.
-  // A key left out isn't lost — it renders as an editable list in the form instead.
+  // Allowlist of structured field names that may create hierarchy in the tree.
+  // Object/array fields left out stay editable in the form but are not tree nodes.
+  // At the document wrapper level, objects that contain an allowed field are
+  // treated as structural roots; unrelated metadata objects are hidden.
+  // Omit to allow every structured field — the original behavior.
   treeKeys?: string[];
   // Priority order of object fields checked for a node's display title.
   captionFields?: string[];
@@ -274,8 +276,8 @@ function buildNode(val: JsonValue, key: string, path: Seg[], exp: Set<string>, d
     const obj = val as Record<string, JsonValue>;
     for (const [k, v] of Object.entries(obj)) {
       if (v === null || typeof v !== "object") continue; // primitives → right panel form
+      if (!isTreeVisible(k, cfg)) continue; // structured field excluded from hierarchy → form only
       if (Array.isArray(v)) {
-        if (!isTreeVisible(k, cfg)) continue; // not allowed in the tree → edited via the form instead
         if (cfg.inlineKeys.includes(k)) {
           // Transparent array: hoist its items as direct children of this node
           const hoisted = (v as JsonValue[])
@@ -303,7 +305,24 @@ function buildNode(val: JsonValue, key: string, path: Seg[], exp: Set<string>, d
 function buildForest(doc: JsonValue, exp: Set<string>, cfg: ResolvedUiConfig): VNode[] {
   if (doc == null) return [];
   if (Array.isArray(doc)) return (doc as JsonValue[]).map((v, i) => buildNode(v, String(i), [i], exp, 0, cfg));
-  if (typeof doc === "object") return Object.entries(doc as Record<string, JsonValue>).map(([k, v]) => buildNode(v, k, [k], exp, 0, cfg));
+  if (typeof doc === "object") {
+    const entries = Object.entries(doc as Record<string, JsonValue>);
+    if (!cfg.treeKeys) return entries.map(([k, v]) => buildNode(v, k, [k], exp, 0, cfg));
+
+    // A document can wrap the actual hierarchy with metadata (for example
+    // { runtime, root }). With a tree allowlist, keep a top-level entry when
+    // its own key is structural or when the object it points to owns one of
+    // the allowed hierarchy fields. If none match, fall back to the original
+    // behavior so a generic single-object document never disappears entirely.
+    const structuralRoots = entries.filter(([k, v]) => {
+      if (isTreeVisible(k, cfg)) return true;
+      if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+      const obj = v as Record<string, JsonValue>;
+      return cfg.treeKeys!.some(treeKey => treeKey in obj);
+    });
+    const visibleEntries = structuralRoots.length > 0 ? structuralRoots : entries;
+    return visibleEntries.map(([k, v]) => buildNode(v, k, [k], exp, 0, cfg));
+  }
   return [buildNode(doc, "(value)", ["$"], exp, 0, cfg)];
 }
 
@@ -801,8 +820,8 @@ export default function TreeEditorApp({
       next = setAt(doc!, selPath, [...arr, template]);
     } else if (selKind === "obj") {
       const obj = selVal as Record<string, JsonValue>;
-      // If the node has a transparent array (e.g. "children"), add into it automatically
-      const inlineKey = cfg.inlineKeys.find(k => k in obj && Array.isArray(obj[k]));
+      // If the node has a visible transparent array (e.g. "children"), add into it automatically
+      const inlineKey = cfg.inlineKeys.find(k => isTreeVisible(k, cfg) && k in obj && Array.isArray(obj[k]));
       if (inlineKey) {
         const arr = obj[inlineKey] as JsonValue[];
         const template = arr.length > 0 ? cloneShape(arr[0]) : {};
@@ -908,7 +927,7 @@ export default function TreeEditorApp({
     const targetNode = getAt(doc, targetPath);
     if (!targetNode || typeof targetNode !== "object" || Array.isArray(targetNode)) return;
     const targetObj = targetNode as Record<string, JsonValue>;
-    const inlineKey = cfg.inlineKeys.find(k => k in targetObj && Array.isArray(targetObj[k]));
+    const inlineKey = cfg.inlineKeys.find(k => isTreeVisible(k, cfg) && k in targetObj && Array.isArray(targetObj[k]));
     let childrenKey: string;
     if (inlineKey) {
       childrenKey = inlineKey;
