@@ -34,7 +34,7 @@ export function createTreeEditorRoutes(adapter: ProjectAdapter = createDefaultAd
     }
 
     try {
-      await adapter.ensureDataDir?.();
+      await adapter.ensureDataDir?.(project);
       const raw = await fs.readFile(adapter.projectFilePath(project), "utf-8");
       const document = JSON.parse(raw) as unknown;
       return NextResponse.json({ document, project, projects: allProjects });
@@ -78,7 +78,7 @@ export function createTreeEditorRoutes(adapter: ProjectAdapter = createDefaultAd
     }
 
     try {
-      await adapter.ensureDataDir?.();
+      await adapter.ensureDataDir?.(project);
       const filePath = adapter.projectFilePath(project);
       const tmpPath = filePath + ".tmp";
       await fs.writeFile(tmpPath, JSON.stringify(document, null, 2), "utf-8");
