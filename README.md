@@ -76,6 +76,46 @@ Also host-specific, on purpose — not part of this package:
 route yourself (`/api/treeEditor/wireframe`, `/api/treeEditor/backup`) —
 neither is part of this package.
 
+## UI config ("pack")
+
+The tree/form formatting rules described above (which array keys count as
+hierarchy, which fields become a node's title, badge colors, …) are all
+driven by an optional `uiConfig` prop — a plain JSON-shaped object you own
+and bring as your own "pack":
+
+```tsx
+import { TreeEditorApp, type TreeEditorUiConfig } from "tree-editor/client";
+import myPack from "./tree-editor.config.json";
+
+const uiConfig: TreeEditorUiConfig = myPack;
+
+export default function Page() {
+  return <TreeEditorApp uiConfig={uiConfig} />;
+}
+```
+
+Every field is optional, and **omitting `uiConfig` entirely reproduces the
+tool's original, hardcoded behavior exactly.** Override only what you need:
+
+| Field | Controls | Default |
+|---|---|---|
+| `inlineKeys` | Array keys whose items are hoisted directly as children of the parent node, instead of showing the array as its own node | `["children","items","nodes","elements","list","entries"]` |
+| `treeKeys` | Allowlist of array keys permitted to appear in the tree at all (hoisted or as their own node). A key left out isn't lost — it renders as an editable list in the form instead. Omit to allow every key | *(unset — every key allowed)* |
+| `captionFields` | Priority order of object fields checked for a node's display title | `["caption","title","name","label","id"]` |
+| `typeColors` | Fixed `type` → badge color map | `{purpose:"#3b82f6", epic:"#8b5cf6", story:"#10b981", "acceptance-criteria":"#f59e0b"}` |
+| `palette` | Fallback badge color palette, chosen by hashing the type name | 10-color default palette |
+| `captionTruncateLength` | Max characters shown for a string value before truncating with "…" | `60` |
+| `longTextThreshold` | String values longer than this (or with a newline) render as a textarea instead of a single-line input | `80` |
+| `showOnlyArraysWithObjects` | Hide arrays whose items are all primitives from the tree (they're still editable in the form) | `true` |
+| `relValues` | Selectable non-default values for a node's `rel` field, each with a tree icon and label | `[{value:"elaborate", icon:"◆", label:"elaborate (part of parent — inherited by children)"}]` |
+
+Example: only show `children` as tree hierarchy, keep everything else
+(e.g. a `notes` array) editable in the form but out of the tree:
+
+```json
+{ "treeKeys": ["children"] }
+```
+
 ## Consuming this package
 
 No npm registry needed — install straight from GitHub, pinned to a

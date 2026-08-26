@@ -12,7 +12,10 @@ type VNode = {
   id: string;
   cap: string;
   badge?: string;
+  badgeColor?: string;
   rel?: string;
+  relIcon?: string;
+  relTitle?: string;
   kind: "obj" | "arr" | "prim";
   children: VNode[];
   path: Seg[];
@@ -34,6 +37,82 @@ type DnDProps = {
   onGapDrop: (parentPath: Seg[], index: number) => void;
 };
 
+// ── UI config ("pack") ─────────────────────────────────────────────────────────
+//
+// Every field here has a default that reproduces the tool's original,
+// hardcoded behavior exactly. A host that doesn't pass `uiConfig` at all sees
+// zero change. A host brings its own JSON-shaped config as a "pack" and
+// overrides only the fields it cares about.
+
+export type TreeEditorRelValue = { value: string; icon: string; label: string };
+
+export type TreeEditorUiConfig = {
+  // Arrays with these keys are "transparent": their items are hoisted directly
+  // as children of the parent node instead of showing the array as an intermediate node.
+  inlineKeys?: string[];
+  // Allowlist of array key names permitted to appear in the tree at all (hoisted
+  // or as their own node). Omit to allow every key — the original behavior.
+  // A key left out isn't lost — it renders as an editable list in the form instead.
+  treeKeys?: string[];
+  // Priority order of object fields checked for a node's display title.
+  captionFields?: string[];
+  // Fixed type → badge color map.
+  typeColors?: Record<string, string>;
+  // Fallback badge color palette, chosen by hashing the type name.
+  palette?: string[];
+  // Max characters shown for a string value before it's truncated with "…".
+  captionTruncateLength?: number;
+  // String values longer than this (or containing a newline) render as a textarea.
+  longTextThreshold?: number;
+  // Hide arrays whose items are all primitives from the tree (shown in the form only).
+  showOnlyArraysWithObjects?: boolean;
+  // Selectable non-default values for a node's `rel` field, with their tree icon.
+  relValues?: TreeEditorRelValue[];
+};
+
+type ResolvedUiConfig = {
+  inlineKeys: string[];
+  treeKeys?: string[];
+  captionFields: string[];
+  typeColors: Record<string, string>;
+  palette: string[];
+  captionTruncateLength: number;
+  longTextThreshold: number;
+  showOnlyArraysWithObjects: boolean;
+  relValues: TreeEditorRelValue[];
+};
+
+const DEFAULT_INLINE_KEYS = ["children", "items", "nodes", "elements", "list", "entries"];
+const DEFAULT_CAPTION_FIELDS = ["caption", "title", "name", "label", "id"];
+const DEFAULT_TYPE_COLORS: Record<string, string> = {
+  purpose: "#3b82f6",
+  epic: "#8b5cf6",
+  story: "#10b981",
+  "acceptance-criteria": "#f59e0b",
+};
+const DEFAULT_PALETTE = ["#6366f1","#8b5cf6","#ec4899","#f43f5e","#f97316","#eab308","#84cc16","#14b8a6","#06b6d4","#3b82f6"];
+const DEFAULT_REL_VALUES: TreeEditorRelValue[] = [
+  { value: "elaborate", icon: "◆", label: "elaborate (part of parent — inherited by children)" },
+];
+
+function resolveUiConfig(cfg?: TreeEditorUiConfig): ResolvedUiConfig {
+  return {
+    inlineKeys: cfg?.inlineKeys ?? DEFAULT_INLINE_KEYS,
+    treeKeys: cfg?.treeKeys,
+    captionFields: cfg?.captionFields ?? DEFAULT_CAPTION_FIELDS,
+    typeColors: cfg?.typeColors ?? DEFAULT_TYPE_COLORS,
+    palette: cfg?.palette ?? DEFAULT_PALETTE,
+    captionTruncateLength: cfg?.captionTruncateLength ?? 60,
+    longTextThreshold: cfg?.longTextThreshold ?? 80,
+    showOnlyArraysWithObjects: cfg?.showOnlyArraysWithObjects ?? true,
+    relValues: cfg?.relValues ?? DEFAULT_REL_VALUES,
+  };
+}
+
+function isTreeVisible(key: string, cfg: ResolvedUiConfig): boolean {
+  return !cfg.treeKeys || cfg.treeKeys.includes(key);
+}
+
 export type TreeEditorAppProps = {
   // Supplies auth headers for every fetch to /api/treeEditor/*. Host-specific
   // (e.g. pulls a bearer token from that host's own auth/session state).
@@ -45,29 +124,18 @@ export type TreeEditorAppProps = {
   // Opt-in: shows the "Backup" button and calls /api/treeEditor/backup.
   // The host must implement that route itself — not part of this package.
   enableBackup?: boolean;
+  // Host-supplied JSON "pack" controlling tree/form formatting. Omit for the
+  // tool's original behavior.
+  uiConfig?: TreeEditorUiConfig;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// Arrays with these keys are "transparent": their items are hoisted directly
-// as children of the parent node instead of showing the array as an intermediate node.
-const INLINE_KEYS = new Set(["children", "items", "nodes", "elements", "list", "entries"]);
-const INLINE_KEYS_ARR = ["children", "items", "nodes", "elements", "list", "entries"];
-
-const TYPE_COLORS: Record<string, string> = {
-  purpose: "#3b82f6",
-  epic: "#8b5cf6",
-  story: "#10b981",
-  "acceptance-criteria": "#f59e0b",
-};
-
-const PALETTE = ["#6366f1","#8b5cf6","#ec4899","#f43f5e","#f97316","#eab308","#84cc16","#14b8a6","#06b6d4","#3b82f6"];
-
-function typeColor(type: string): string {
-  if (type in TYPE_COLORS) return TYPE_COLORS[type];
+function typeColor(type: string, cfg: ResolvedUiConfig): string {
+  if (type in cfg.typeColors) return cfg.typeColors[type];
   let h = 0;
   for (const c of type) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
-  return PALETTE[h % PALETTE.length];
+  return cfg.palette[h % cfg.palette.length];
 }
 
 function badgeLabel(type: string): string {
@@ -153,19 +221,22 @@ function swapAt(root: JsonValue, path: Seg[], dir: -1 | 1): JsonValue {
 
 // ── Virtual tree builder ───────────────────────────────────────────────────────
 
-function nodeCaption(key: string, val: JsonValue): { cap: string; badge?: string } {
+function nodeCaption(key: string, val: JsonValue, cfg: ResolvedUiConfig): { cap: string; badge?: string } {
   if (val === null) return { cap: `${key}: null` };
   if (typeof val === "string") {
     if (val.length === 0) return { cap: `${key}: ""` };
-    const p = val.replace(/\n/g, "↵").slice(0, 60);
-    return { cap: `${key}: "${p}${val.length > 60 ? "…" : ""}"` };
+    const p = val.replace(/\n/g, "↵").slice(0, cfg.captionTruncateLength);
+    return { cap: `${key}: "${p}${val.length > cfg.captionTruncateLength ? "…" : ""}"` };
   }
   if (typeof val === "number" || typeof val === "boolean") return { cap: `${key}: ${val}` };
   if (Array.isArray(val)) return { cap: `${key}  [${val.length}]` };
 
   // Object — prefer semantic title over raw JSON key
   const obj = val as Record<string, JsonValue>;
-  const hint = obj.caption ?? obj.title ?? obj.name ?? obj.label ?? obj.id;
+  let hint: JsonValue | undefined;
+  for (const f of cfg.captionFields) {
+    if (obj[f] != null) { hint = obj[f]; break; }
+  }
   const typeLabel = typeof obj.type === "string" ? obj.type : undefined;
 
   if (hint != null && typeof hint !== "object" && String(hint).trim() !== "") {
@@ -188,12 +259,14 @@ function nodeCaption(key: string, val: JsonValue): { cap: string; badge?: string
   return { cap: `${keyLabel}  {${Object.keys(obj).length}}`, badge: typeLabel };
 }
 
-function buildNode(val: JsonValue, key: string, path: Seg[], exp: Set<string>, depth: number): VNode {
+function buildNode(val: JsonValue, key: string, path: Seg[], exp: Set<string>, depth: number, cfg: ResolvedUiConfig): VNode {
   const id = pathId(path);
   const kind: VNode["kind"] = Array.isArray(val) ? "arr" : val !== null && typeof val === "object" ? "obj" : "prim";
   const expanded = exp.has(id);
-  const { cap, badge } = nodeCaption(key, val);
+  const { cap, badge } = nodeCaption(key, val, cfg);
+  const badgeColor = badge ? typeColor(badge, cfg) : undefined;
   const relVal = kind === "obj" ? (typeof (val as Record<string, JsonValue>).rel === "string" ? (val as Record<string, JsonValue>).rel as string : undefined) : undefined;
+  const relEntry = relVal ? cfg.relValues.find(rv => rv.value === relVal) : undefined;
 
   let children: VNode[] = [];
 
@@ -202,35 +275,36 @@ function buildNode(val: JsonValue, key: string, path: Seg[], exp: Set<string>, d
     for (const [k, v] of Object.entries(obj)) {
       if (v === null || typeof v !== "object") continue; // primitives → right panel form
       if (Array.isArray(v)) {
-        if (INLINE_KEYS.has(k)) {
+        if (!isTreeVisible(k, cfg)) continue; // not allowed in the tree → edited via the form instead
+        if (cfg.inlineKeys.includes(k)) {
           // Transparent array: hoist its items as direct children of this node
           const hoisted = (v as JsonValue[])
-            .map((item, i) => buildNode(item, String(i), [...path, k, i], exp, depth + 1))
+            .map((item, i) => buildNode(item, String(i), [...path, k, i], exp, depth + 1, cfg))
             .filter(c => c.kind !== "prim");
           children.push(...hoisted);
         } else {
           // Only show arrays that contain objects; primitive arrays live in the right panel
           const hasObjects = (v as JsonValue[]).some(x => x !== null && typeof x === "object");
-          if (hasObjects) children.push(buildNode(v, k, [...path, k], exp, depth + 1));
+          if (!cfg.showOnlyArraysWithObjects || hasObjects) children.push(buildNode(v, k, [...path, k], exp, depth + 1, cfg));
         }
       } else {
-        children.push(buildNode(v, k, [...path, k], exp, depth + 1));
+        children.push(buildNode(v, k, [...path, k], exp, depth + 1, cfg));
       }
     }
   } else if (kind === "arr") {
     children = (val as JsonValue[])
-      .map((v, i) => buildNode(v, String(i), [...path, i], exp, depth + 1))
+      .map((v, i) => buildNode(v, String(i), [...path, i], exp, depth + 1, cfg))
       .filter(c => c.kind !== "prim");
   }
 
-  return { id, cap, badge, rel: relVal, kind, children, path, expanded };
+  return { id, cap, badge, badgeColor, rel: relVal, relIcon: relEntry?.icon, relTitle: relEntry?.label, kind, children, path, expanded };
 }
 
-function buildForest(doc: JsonValue, exp: Set<string>): VNode[] {
+function buildForest(doc: JsonValue, exp: Set<string>, cfg: ResolvedUiConfig): VNode[] {
   if (doc == null) return [];
-  if (Array.isArray(doc)) return (doc as JsonValue[]).map((v, i) => buildNode(v, String(i), [i], exp, 0));
-  if (typeof doc === "object") return Object.entries(doc as Record<string, JsonValue>).map(([k, v]) => buildNode(v, k, [k], exp, 0));
-  return [buildNode(doc, "(value)", ["$"], exp, 0)];
+  if (Array.isArray(doc)) return (doc as JsonValue[]).map((v, i) => buildNode(v, String(i), [i], exp, 0, cfg));
+  if (typeof doc === "object") return Object.entries(doc as Record<string, JsonValue>).map(([k, v]) => buildNode(v, k, [k], exp, 0, cfg));
+  return [buildNode(doc, "(value)", ["$"], exp, 0, cfg)];
 }
 
 function collectIds(nodes: VNode[], maxDepth: number, depth = 0): string[] {
@@ -340,13 +414,13 @@ function reorderNode(doc: JsonValue, dragPath: Seg[], targetParentPath: Seg[], t
 
 // ── Form components ────────────────────────────────────────────────────────────
 
-function PrimField({ label, val, onChange }: { label: string; val: JsonPrimitive; onChange: (v: JsonValue) => void }) {
+function PrimField({ label, val, onChange, longTextThreshold = 80 }: { label: string; val: JsonPrimitive; onChange: (v: JsonValue) => void; longTextThreshold?: number }) {
   if (typeof val === "boolean")
     return <div className="field"><label><input type="checkbox" checked={val} onChange={e => onChange(e.target.checked)} /> {label}</label></div>;
   if (typeof val === "number")
     return <div className="field"><label>{label}</label><input type="number" value={val} onChange={e => onChange(Number(e.target.value))} /></div>;
   const s = val == null ? "" : String(val);
-  const long = s.length > 80 || s.includes("\n");
+  const long = s.length > longTextThreshold || s.includes("\n");
   return (
     <div className="field">
       <label>{label}</label>
@@ -379,7 +453,7 @@ function PrimArrField({ label, items, onChange }: { label: string; items: JsonPr
   );
 }
 
-function RelField({ val, onChange }: { val: Record<string, JsonValue>; onChange: (v: JsonValue) => void }) {
+function RelField({ val, cfg, onChange }: { val: Record<string, JsonValue>; cfg: ResolvedUiConfig; onChange: (v: JsonValue) => void }) {
   if (typeof val.type !== "string") return null;
   const rel = typeof val.rel === "string" ? val.rel : "";
   const handleChange = (newRel: string) => {
@@ -396,19 +470,46 @@ function RelField({ val, onChange }: { val: Record<string, JsonValue>; onChange:
       <label>rel — relationship to parent</label>
       <select value={rel} onChange={e => handleChange(e.target.value)}>
         <option value="">extend (default — inherits from parent)</option>
-        <option value="elaborate">◆ elaborate (part of parent — inherited by children)</option>
+        {cfg.relValues.map(rv => (
+          <option key={rv.value} value={rv.value}>{rv.icon} {rv.label}</option>
+        ))}
       </select>
     </div>
   );
 }
 
-function ObjForm({ val, onChange, skip }: { val: Record<string, JsonValue>; onChange: (v: JsonValue) => void; skip?: string[] }) {
+// Editable list of object items, used in the form for array keys that are
+// excluded from the tree (via `treeKeys`) — they still need to be editable.
+function ObjArrField({ label, items, cfg, onChange }: { label: string; items: JsonValue[]; cfg: ResolvedUiConfig; onChange: (v: JsonValue) => void }) {
+  const upd = (i: number, v: JsonValue) => { const next = [...items]; next[i] = v; onChange(next); };
+  const remove = (i: number) => onChange(items.filter((_, j) => j !== i));
+  const add = () => onChange([...items, items.length > 0 ? cloneShape(items[0]) : {}]);
+  return (
+    <div className="field">
+      <label>{label} ({items.length})</label>
+      {items.map((item, i) => (
+        <div key={i} className="nested obj-arr-item">
+          <div className="obj-arr-item-header">
+            <span>#{i + 1}</span>
+            <button type="button" onClick={() => remove(i)}>×</button>
+          </div>
+          {item !== null && typeof item === "object" && !Array.isArray(item)
+            ? <ObjForm val={item as Record<string, JsonValue>} cfg={cfg} onChange={nv => upd(i, nv)} />
+            : <PrimField label={`item ${i + 1}`} val={item as JsonPrimitive} onChange={nv => upd(i, nv)} longTextThreshold={cfg.longTextThreshold} />}
+        </div>
+      ))}
+      <button type="button" className="add-btn" onClick={add}>+ {label}</button>
+    </div>
+  );
+}
+
+function ObjForm({ val, cfg, onChange, skip }: { val: Record<string, JsonValue>; cfg: ResolvedUiConfig; onChange: (v: JsonValue) => void; skip?: string[] }) {
   const upd = (k: string, v: JsonValue) => onChange({ ...val, [k]: v });
   return (
     <>
       {Object.entries(val).filter(([k]) => !skip?.includes(k)).map(([k, v]) => {
         if (v === null || typeof v !== "object")
-          return <PrimField key={k} label={k} val={v as JsonPrimitive} onChange={nv => upd(k, nv)} />;
+          return <PrimField key={k} label={k} val={v as JsonPrimitive} onChange={nv => upd(k, nv)} longTextThreshold={cfg.longTextThreshold} />;
         if (Array.isArray(v) && v.every(x => x === null || typeof x !== "object"))
           return <PrimArrField key={k} label={k} items={v as JsonPrimitive[]} onChange={nv => upd(k, nv)} />;
         if (!Array.isArray(v))
@@ -416,10 +517,12 @@ function ObjForm({ val, onChange, skip }: { val: Record<string, JsonValue>; onCh
             <div key={k} className="field">
               <label>{k}</label>
               <div className="nested">
-                <ObjForm val={v as Record<string, JsonValue>} onChange={nv => upd(k, nv)} />
+                <ObjForm val={v as Record<string, JsonValue>} cfg={cfg} onChange={nv => upd(k, nv)} />
               </div>
             </div>
           );
+        if (!isTreeVisible(k, cfg))
+          return <ObjArrField key={k} label={k} items={v as JsonValue[]} cfg={cfg} onChange={nv => upd(k, nv)} />;
         return (
           <div key={k} className="field">
             <label>{k}</label>
@@ -459,7 +562,7 @@ function VNodeRow({ node, selId, onSel, onToggle, depth, dnd }: {
   const sel = selId === node.id;
   const hasKids = node.children.length > 0;
   const kindIcon = node.kind === "obj" ? "{}" : node.kind === "arr" ? "[]" : "·";
-  const badgeColor = node.badge ? typeColor(node.badge) : null;
+  const badgeColor = node.badgeColor ?? null;
   const isDragTarget = dnd.dropTargetId === node.id;
   const canDrag = depth > 0;
   let rowClass = "row" + (sel ? " selected" : "");
@@ -487,7 +590,7 @@ function VNodeRow({ node, selId, onSel, onToggle, depth, dnd }: {
           : <span className="kind-icon">{kindIcon}</span>
         }
         <span className={"cap" + (depth === 0 ? " bold" : "")} onClick={() => onSel(node.id, node.path)}>
-          {node.rel === "elaborate" && <span className="rel-elaborate-icon" title="elaborate — part of parent, inherited by all children">◆ </span>}
+          {node.relIcon && <span className="rel-elaborate-icon" title={node.relTitle}>{node.relIcon} </span>}
           {node.cap}
         </span>
       </div>
@@ -516,7 +619,9 @@ export default function TreeEditorApp({
   authHeaders: authHeadersProp,
   enableWireframe = false,
   enableBackup = false,
+  uiConfig,
 }: TreeEditorAppProps = {}) {
+  const cfg = useMemo(() => resolveUiConfig(uiConfig), [uiConfig]);
   const [doc, setDoc] = useState<JsonValue>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selPath, setSelPath] = useState<Seg[] | null>(null);
@@ -537,7 +642,7 @@ export default function TreeEditorApp({
   const [wireframeText, setWireframeText] = useState('');
   const [loadingWireframe, setLoadingWireframe] = useState(false);
 
-  const forest = useMemo(() => buildForest(doc, expanded), [doc, expanded]);
+  const forest = useMemo(() => buildForest(doc, expanded, cfg), [doc, expanded, cfg]);
 
   const selVal = useMemo(
     () => (selPath && selPath.length > 0 ? getAt(doc, selPath) : doc),
@@ -575,14 +680,14 @@ export default function TreeEditorApp({
       setSelPath(null);
       setSelId(null);
       // Pre-expand first two levels
-      const initForest = buildForest(newDoc, new Set());
+      const initForest = buildForest(newDoc, new Set(), cfg);
       setExpanded(new Set(collectIds(initForest, 1)));
     } catch {
       setDoc(null);
     } finally {
       setLoaded(true);
     }
-  }, [authHeaders]);
+  }, [authHeaders, cfg]);
 
   useEffect(() => { void loadProject(null); }, [loadProject]);
 
@@ -697,7 +802,7 @@ export default function TreeEditorApp({
     } else if (selKind === "obj") {
       const obj = selVal as Record<string, JsonValue>;
       // If the node has a transparent array (e.g. "children"), add into it automatically
-      const inlineKey = INLINE_KEYS_ARR.find(k => k in obj && Array.isArray(obj[k]));
+      const inlineKey = cfg.inlineKeys.find(k => k in obj && Array.isArray(obj[k]));
       if (inlineKey) {
         const arr = obj[inlineKey] as JsonValue[];
         const template = arr.length > 0 ? cloneShape(arr[0]) : {};
@@ -724,7 +829,7 @@ export default function TreeEditorApp({
     // If the immediate parent is a transparent (hoisted) array — e.g. "children" —
     // it is not a visible tree row, so step up to the object that owns it.
     const lastSeg = parentPath[parentPath.length - 1];
-    if (typeof lastSeg === "string" && INLINE_KEYS.has(lastSeg)) {
+    if (typeof lastSeg === "string" && cfg.inlineKeys.includes(lastSeg)) {
       parentPath = parentPath.slice(0, -1);
     }
     if (parentPath.length) {
@@ -803,7 +908,7 @@ export default function TreeEditorApp({
     const targetNode = getAt(doc, targetPath);
     if (!targetNode || typeof targetNode !== "object" || Array.isArray(targetNode)) return;
     const targetObj = targetNode as Record<string, JsonValue>;
-    const inlineKey = INLINE_KEYS_ARR.find(k => k in targetObj && Array.isArray(targetObj[k]));
+    const inlineKey = cfg.inlineKeys.find(k => k in targetObj && Array.isArray(targetObj[k]));
     let childrenKey: string;
     if (inlineKey) {
       childrenKey = inlineKey;
@@ -819,7 +924,7 @@ export default function TreeEditorApp({
     setDoc(result.doc);
     saveDoc(result.doc);
     selectAndReveal(result.newPath);
-  }, [doc, selectAndReveal, saveDoc]);
+  }, [doc, selectAndReveal, saveDoc, cfg]);
 
   const handleDragEnd = useCallback(() => {
     dragPathRef.current = null;
@@ -957,7 +1062,7 @@ export default function TreeEditorApp({
     if (!selPath || !selPath.length) {
       // Show root-level object fields when nothing selected
       if (doc !== null && doc !== undefined && typeof doc === "object" && !Array.isArray(doc)) {
-        return <ObjForm val={doc as Record<string, JsonValue>} onChange={handleDocChange} />;
+        return <ObjForm val={doc as Record<string, JsonValue>} cfg={cfg} onChange={handleDocChange} />;
       }
       return <div className="placeholder">Select a node on the left to edit its fields</div>;
     }
@@ -991,9 +1096,10 @@ export default function TreeEditorApp({
             </button>
           )}
           {keyField}
-          <RelField val={objVal} onChange={nv => handleValChange(selPath, nv)} />
+          <RelField val={objVal} cfg={cfg} onChange={nv => handleValChange(selPath, nv)} />
           <ObjForm
             val={objVal}
+            cfg={cfg}
             onChange={nv => handleValChange(selPath, nv)}
             skip={hasType ? ["rel"] : undefined}
           />
@@ -1030,7 +1136,7 @@ export default function TreeEditorApp({
     return (
       <>
         {keyField}
-        <PrimField label={key} val={selVal as JsonPrimitive} onChange={nv => handleValChange(selPath, nv)} />
+        <PrimField label={key} val={selVal as JsonPrimitive} onChange={nv => handleValChange(selPath, nv)} longTextThreshold={cfg.longTextThreshold} />
       </>
     );
   };
@@ -1172,6 +1278,9 @@ export default function TreeEditorApp({
         .key-field { border-bottom: 2px solid #e0e7ff; padding-bottom: 14px; margin-bottom: 16px; }
         .key-field > label { color: #6366f1; }
         .nested { margin-left: 12px; padding-left: 12px; border-left: 2px solid #e2e8f0; margin-top: 4px; padding-top: 4px; }
+        .obj-arr-item { margin-bottom: 10px; }
+        .obj-arr-item-header { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #94a3b8; font-weight: 600; margin-bottom: 4px; }
+        .obj-arr-item-header button { padding: 0 6px; font-size: 12px; line-height: 1.6; }
         .nested-note { font-size: 12px; color: #94a3b8; padding: 6px 10px; background: #f8fafc; border-radius: 6px; border: 1px dashed #e2e8f0; }
         .arr-row { display: flex; gap: 4px; margin-bottom: 4px; }
         .arr-row input { flex: 1; }
@@ -1221,6 +1330,7 @@ export default function TreeEditorApp({
         .dark .page .key-field { border-bottom-color: #3730a3; }
         .dark .page .key-field > label { color: #a5b4fc; }
         .dark .page .nested { border-left-color: #333; }
+        .dark .page .obj-arr-item-header { color: #64748b; }
         .dark .page .nested-note { background: #1a1a1a; border-color: #333; color: #94a3b8; }
         .dark .page input, .dark .page textarea, .dark .page select { background: #1f1f1f; color: #f1f5f9; border-color: #444; }
         .dark .page input:focus, .dark .page textarea:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,.2); }
