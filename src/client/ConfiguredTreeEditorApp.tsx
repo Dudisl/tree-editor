@@ -20,7 +20,6 @@ export type TreeEditorUiConfig = BaseTreeEditorUiConfig & {
   // `order` is optional. If no field has an order, original JSON field order
   // is preserved exactly. When orders are supplied, ordered fields are shown
   // first by ascending order; unordered fields follow in their original order.
-  // The object form remains extensible for future field-level UI metadata.
   fields?: Record<string, TreeEditorFieldUiConfig>;
 };
 
@@ -41,6 +40,24 @@ function configuredOrder(entry: TreeEditorFieldUiConfig | undefined): number | u
 function splitCountSuffix(raw: string): { key: string; suffix: string } {
   const match = raw.match(/^(.*?)(\s+\(\d+\))$/);
   return match ? { key: match[1].trim(), suffix: match[2] } : { key: raw.trim(), suffix: "" };
+}
+
+function directFieldLabel(field: HTMLElement): HTMLLabelElement | null {
+  return Array.from(field.children).find(
+    (child): child is HTMLLabelElement => child instanceof HTMLLabelElement
+  ) ?? null;
+}
+
+function clearOrdering(parent: HTMLElement) {
+  if (parent.dataset.treeEditorOrdered !== "true") return;
+  Array.from(parent.children).forEach(child => {
+    if (child instanceof HTMLElement) child.style.removeProperty("order");
+  });
+  parent.style.display = parent.dataset.treeEditorOriginalDisplay ?? "";
+  parent.style.flexDirection = parent.dataset.treeEditorOriginalFlexDirection ?? "";
+  delete parent.dataset.treeEditorOrdered;
+  delete parent.dataset.treeEditorOriginalDisplay;
+  delete parent.dataset.treeEditorOriginalFlexDirection;
 }
 
 function applyFieldPresentation(root: HTMLElement, fields: Record<string, TreeEditorFieldUiConfig> | undefined) {
@@ -74,52 +91,68 @@ function applyFieldPresentation(root: HTMLElement, fields: Record<string, TreeEd
     }
   });
 
-  // Reorder only when at least one configured field explicitly has `order`.
-  // This makes omission of `order` a strict no-op and preserves today's
-  // Object.entries()/JSON order as the default behavior.
-  const hasConfiguredOrder = fields && Object.values(fields).some(entry => configuredOrder(entry) !== undefined);
-  if (!hasConfiguredOrder) return;
-
   const parents = new Set<HTMLElement>();
-  root.querySelectorAll<HTMLLabelElement>(".field > label[data-tree-editor-field-key]").forEach(label => {
-    const field = label.parentElement;
-    const parent = field?.parentElement;
-    if (field && parent && !field.classList.contains("key-field") && !field.classList.contains("rel-field")) {
+  root.querySelectorAll<HTMLElement>(".field").forEach(field => {
+    const label = directFieldLabel(field);
+    const parent = field.parentElement;
+    if (label?.dataset.treeEditorFieldKey && parent && !field.classList.contains("key-field") && !field.classList.contains("rel-field")) {
       parents.add(parent);
     }
   });
 
   parents.forEach(parent => {
-    const candidates = Array.from(parent.children).filter((child): child is HTMLElement => {
-      if (!(child instanceof HTMLElement) || !child.classList.contains("field")) return false;
+    const allChildren = Array.from(parent.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
+    const candidates = allChildren.filter(child => {
+      if (!child.classList.contains("field")) return false;
       if (child.classList.contains("key-field") || child.classList.contains("rel-field")) return false;
-      return !!child.querySelector(":scope > label[data-tree-editor-field-key]");
+      return !!directFieldLabel(child)?.dataset.treeEditorFieldKey;
     });
-    if (candidates.length < 2) return;
+
+    if (candidates.length < 2) {
+      clearOrdering(parent);
+      return;
+    }
 
     const withMeta = candidates.map((field, index) => {
-      const label = field.querySelector<HTMLLabelElement>(":scope > label[data-tree-editor-field-key]");
-      const key = label?.dataset.treeEditorFieldKey;
+      const key = directFieldLabel(field)?.dataset.treeEditorFieldKey;
       return { field, index, order: key ? configuredOrder(fields?.[key]) : undefined };
     });
 
-    // If this particular form level has no ordered fields, leave it untouched.
-    if (!withMeta.some(item => item.order !== undefined)) return;
+    // Strict default: a form level with no explicit orders is left exactly as rendered.
+    if (!withMeta.some(item => item.order !== undefined)) {
+      clearOrdering(parent);
+      return;
+    }
 
     const sorted = [...withMeta].sort((a, b) => {
-      const ao = a.order;
-      const bo = b.order;
-      if (ao !== undefined && bo !== undefined) return ao === bo ? a.index - b.index : ao - bo;
-      if (ao !== undefined) return -1;
-      if (bo !== undefined) return 1;
+      if (a.order !== undefined && b.order !== undefined) {
+        return a.order === b.order ? a.index - b.index : a.order - b.order;
+      }
+      if (a.order !== undefined) return -1;
+      if (b.order !== undefined) return 1;
       return a.index - b.index;
     });
 
-    const alreadySorted = sorted.every((item, index) => item.field === candidates[index]);
-    if (alreadySorted) return;
+    // Do not move DOM nodes. Moving them fights React reconciliation and was the
+    // cause of the previous render loop. Instead, keep the DOM untouched and use
+    // CSS flex order to map the sorted fields onto the same visual slots.
+    if (parent.dataset.treeEditorOrdered !== "true") {
+      parent.dataset.treeEditorOriginalDisplay = parent.style.display;
+      parent.dataset.treeEditorOriginalFlexDirection = parent.style.flexDirection;
+      parent.dataset.treeEditorOrdered = "true";
+    }
+    parent.style.display = "flex";
+    parent.style.flexDirection = "column";
 
-    const anchor = candidates[0];
-    sorted.forEach(item => parent.insertBefore(item.field, anchor));
+    // Preserve every non-field child's original visual position (heading, key
+    // field, rel field, metadata, etc.). Only the candidate field slots change.
+    allChildren.forEach((child, index) => {
+      child.style.order = String(index * 10);
+    });
+    const candidateSlots = candidates.map(field => allChildren.indexOf(field));
+    sorted.forEach((item, index) => {
+      item.field.style.order = String(candidateSlots[index] * 10);
+    });
   });
 }
 
@@ -131,27 +164,26 @@ export default function ConfiguredTreeEditorApp({ uiConfig, ...props }: TreeEdit
     const root = rootRef.current;
     if (!root) return;
 
-    let applying = false;
+    let scheduled = false;
     const apply = () => {
-      if (applying) return;
-      applying = true;
-      try {
-        applyFieldPresentation(root, fields);
-      } finally {
-        applying = false;
-      }
+      scheduled = false;
+      applyFieldPresentation(root, fields);
+    };
+    const scheduleApply = () => {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(apply);
     };
 
-    // Apply synchronously after every mount/update, then keep watching because
-    // TreeEditorApp renders the form after async data load and on selection.
     apply();
-    const observer = new MutationObserver(apply);
-    observer.observe(root, { childList: true, subtree: true, characterData: true });
 
-    // Also re-apply on the next paint. This covers React hydration/reconciliation
-    // replacing a field after the observer was attached.
+    // Observe only structural changes made by React. Label text and CSS style
+    // changes made above are deliberately not observed, so presentation changes
+    // cannot feed back into the observer and create a render loop.
+    const observer = new MutationObserver(scheduleApply);
+    observer.observe(root, { childList: true, subtree: true });
+
     const frame = requestAnimationFrame(apply);
-
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
@@ -159,11 +191,7 @@ export default function ConfiguredTreeEditorApp({ uiConfig, ...props }: TreeEdit
   }, [fields]);
 
   return (
-    <div
-      ref={rootRef}
-      data-tree-editor-fields={fields ? "enabled" : "disabled"}
-      style={{ display: "contents" }}
-    >
+    <div ref={rootRef} style={{ display: "contents" }}>
       <BaseTreeEditorApp {...props} uiConfig={uiConfig} />
     </div>
   );
