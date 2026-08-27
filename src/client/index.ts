@@ -1,4 +1,4 @@
-export { default as TreeEditorApp } from "./TreeEditorApp";
+export { default as TreeEditorApp } from "./StableTreeEditorApp";
 export type {
   TreeEditorAppProps,
   TreeEditorUiConfig,
