@@ -1,2 +1,3 @@
-export { default as TreeEditorApp } from "./TreeEditorApp";
-export type { TreeEditorAppProps, TreeEditorUiConfig, TreeEditorRelValue } from "./TreeEditorApp";
+export { default as TreeEditorApp } from "./ConfiguredTreeEditorApp";
+export type { TreeEditorAppProps, TreeEditorUiConfig, TreeEditorFieldUiConfig } from "./ConfiguredTreeEditorApp";
+export type { TreeEditorRelValue } from "./TreeEditorApp";
