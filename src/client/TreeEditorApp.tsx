@@ -46,6 +46,13 @@ type DnDProps = {
 
 export type TreeEditorRelValue = { value: string; icon: string; label: string };
 
+export type TreeEditorFieldUiConfig =
+  | string
+  | {
+      label?: string;
+      order?: number;
+    };
+
 export type TreeEditorUiConfig = {
   // Arrays with these keys are "transparent": their items are hoisted directly
   // as children of the parent node instead of showing the array as an intermediate node.
@@ -70,6 +77,12 @@ export type TreeEditorUiConfig = {
   showOnlyArraysWithObjects?: boolean;
   // Selectable non-default values for a node's `rel` field, with their tree icon.
   relValues?: TreeEditorRelValue[];
+  // Optional presentation-only config by raw JSON field name.
+  // A string is shorthand for { label }. `order` controls form presentation only.
+  // If no field at a given object level has `order`, Object.entries()/JSON order
+  // is preserved exactly. Ordered fields come first; unordered fields retain their
+  // original relative order after them.
+  fields?: Record<string, TreeEditorFieldUiConfig>;
 };
 
 type ResolvedUiConfig = {
@@ -82,6 +95,7 @@ type ResolvedUiConfig = {
   longTextThreshold: number;
   showOnlyArraysWithObjects: boolean;
   relValues: TreeEditorRelValue[];
+  fields?: Record<string, TreeEditorFieldUiConfig>;
 };
 
 const DEFAULT_INLINE_KEYS = ["children", "items", "nodes", "elements", "list", "entries"];
@@ -108,11 +122,41 @@ function resolveUiConfig(cfg?: TreeEditorUiConfig): ResolvedUiConfig {
     longTextThreshold: cfg?.longTextThreshold ?? 80,
     showOnlyArraysWithObjects: cfg?.showOnlyArraysWithObjects ?? true,
     relValues: cfg?.relValues ?? DEFAULT_REL_VALUES,
+    fields: cfg?.fields,
   };
 }
 
 function isTreeVisible(key: string, cfg: ResolvedUiConfig): boolean {
   return !cfg.treeKeys || cfg.treeKeys.includes(key);
+}
+
+function fieldLabel(key: string, cfg: ResolvedUiConfig): string {
+  const entry = cfg.fields?.[key];
+  if (typeof entry === "string") return entry;
+  return entry?.label ?? key;
+}
+
+function fieldOrder(key: string, cfg: ResolvedUiConfig): number | undefined {
+  const entry = cfg.fields?.[key];
+  if (typeof entry === "string" || entry == null) return undefined;
+  return typeof entry.order === "number" && Number.isFinite(entry.order) ? entry.order : undefined;
+}
+
+function formEntries(val: Record<string, JsonValue>, cfg: ResolvedUiConfig, skip?: string[]): [string, JsonValue][] {
+  const entries = Object.entries(val).filter(([k]) => !skip?.includes(k));
+  if (!entries.some(([k]) => fieldOrder(k, cfg) !== undefined)) return entries;
+
+  return entries
+    .map((entry, index) => ({ entry, index, order: fieldOrder(entry[0], cfg) }))
+    .sort((a, b) => {
+      if (a.order !== undefined && b.order !== undefined) {
+        return a.order === b.order ? a.index - b.index : a.order - b.order;
+      }
+      if (a.order !== undefined) return -1;
+      if (b.order !== undefined) return 1;
+      return a.index - b.index;
+    })
+    .map(({ entry }) => entry);
 }
 
 export type TreeEditorAppProps = {
@@ -524,27 +568,29 @@ function ObjArrField({ label, items, cfg, onChange }: { label: string; items: Js
 
 function ObjForm({ val, cfg, onChange, skip }: { val: Record<string, JsonValue>; cfg: ResolvedUiConfig; onChange: (v: JsonValue) => void; skip?: string[] }) {
   const upd = (k: string, v: JsonValue) => onChange({ ...val, [k]: v });
+  const entries = formEntries(val, cfg, skip);
   return (
     <>
-      {Object.entries(val).filter(([k]) => !skip?.includes(k)).map(([k, v]) => {
+      {entries.map(([k, v]) => {
+        const label = fieldLabel(k, cfg);
         if (v === null || typeof v !== "object")
-          return <PrimField key={k} label={k} val={v as JsonPrimitive} onChange={nv => upd(k, nv)} longTextThreshold={cfg.longTextThreshold} />;
+          return <PrimField key={k} label={label} val={v as JsonPrimitive} onChange={nv => upd(k, nv)} longTextThreshold={cfg.longTextThreshold} />;
         if (Array.isArray(v) && v.every(x => x === null || typeof x !== "object"))
-          return <PrimArrField key={k} label={k} items={v as JsonPrimitive[]} onChange={nv => upd(k, nv)} />;
+          return <PrimArrField key={k} label={label} items={v as JsonPrimitive[]} onChange={nv => upd(k, nv)} />;
         if (!Array.isArray(v))
           return (
             <div key={k} className="field">
-              <label>{k}</label>
+              <label>{label}</label>
               <div className="nested">
                 <ObjForm val={v as Record<string, JsonValue>} cfg={cfg} onChange={nv => upd(k, nv)} />
               </div>
             </div>
           );
         if (!isTreeVisible(k, cfg))
-          return <ObjArrField key={k} label={k} items={v as JsonValue[]} cfg={cfg} onChange={nv => upd(k, nv)} />;
+          return <ObjArrField key={k} label={label} items={v as JsonValue[]} cfg={cfg} onChange={nv => upd(k, nv)} />;
         return (
           <div key={k} className="field">
-            <label>{k}</label>
+            <label>{label}</label>
             <div className="nested-note">Array [{(v as JsonValue[]).length}] — select in tree to edit items</div>
           </div>
         );
@@ -1155,7 +1201,7 @@ export default function TreeEditorApp({
     return (
       <>
         {keyField}
-        <PrimField label={key} val={selVal as JsonPrimitive} onChange={nv => handleValChange(selPath, nv)} longTextThreshold={cfg.longTextThreshold} />
+        <PrimField label={fieldLabel(key, cfg)} val={selVal as JsonPrimitive} onChange={nv => handleValChange(selPath, nv)} longTextThreshold={cfg.longTextThreshold} />
       </>
     );
   };
