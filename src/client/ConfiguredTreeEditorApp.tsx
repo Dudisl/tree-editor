@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useLayoutEffect, useRef } from "react";
 import BaseTreeEditorApp, {
   type TreeEditorAppProps as BaseTreeEditorAppProps,
   type TreeEditorUiConfig as BaseTreeEditorUiConfig,
@@ -35,29 +35,28 @@ function splitCountSuffix(raw: string): { key: string; suffix: string } {
   return match ? { key: match[1].trim(), suffix: match[2] } : { key: raw.trim(), suffix: "" };
 }
 
-function labelTextNode(label: HTMLLabelElement): Text | null {
-  // Boolean fields render as <label><input ... /> fieldName</label>, while
-  // other fields render a plain text label. Work only on the text node so the
-  // checkbox/input itself is never replaced.
-  for (let i = label.childNodes.length - 1; i >= 0; i -= 1) {
-    const node = label.childNodes[i];
-    if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) return node as Text;
-  }
-  return null;
-}
-
 function applyFieldLabels(root: HTMLElement, fields: Record<string, TreeEditorFieldUiConfig> | undefined) {
   root.querySelectorAll<HTMLLabelElement>(".field > label").forEach(label => {
-    const textNode = labelTextNode(label);
+    // Boolean fields contain the checkbox inside the label; other labels are
+    // plain text. Keep the input intact and replace only the text node.
+    const textNodes = Array.from(label.childNodes).filter(
+      node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
+    ) as Text[];
+    const textNode = textNodes[textNodes.length - 1];
     if (!textNode) return;
 
-    const currentText = textNode.textContent?.trim() ?? "";
-    if (!label.dataset.treeEditorOriginalLabel) {
-      label.dataset.treeEditorOriginalLabel = currentText;
+    const current = textNode.textContent?.trim() ?? "";
+    if (!label.dataset.treeEditorFieldKey) {
+      const { key } = splitCountSuffix(current);
+      label.dataset.treeEditorFieldKey = key;
+      label.dataset.treeEditorOriginalLabel = current;
     }
 
-    const original = label.dataset.treeEditorOriginalLabel;
-    const { key, suffix } = splitCountSuffix(original);
+    const key = label.dataset.treeEditorFieldKey;
+    const original = label.dataset.treeEditorOriginalLabel ?? current;
+    if (!key) return;
+
+    const { suffix } = splitCountSuffix(original);
     const replacement = configuredLabel(fields?.[key]);
     const desired = replacement ? `${replacement}${suffix}` : original;
     const prefix = label.querySelector('input[type="checkbox"]') ? " " : "";
@@ -72,22 +71,34 @@ export default function ConfiguredTreeEditorApp({ uiConfig, ...props }: TreeEdit
   const rootRef = useRef<HTMLDivElement>(null);
   const fields = uiConfig?.fields;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
     const apply = () => applyFieldLabels(root, fields);
-    apply();
 
-    // Forms change as selection changes and while arrays are edited. Re-apply
-    // the presentation mapping to newly rendered labels without touching data.
+    // Apply synchronously after every mount/update, then keep watching because
+    // TreeEditorApp renders the form after async data load and on selection.
+    apply();
     const observer = new MutationObserver(apply);
     observer.observe(root, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
+
+    // Also re-apply on the next paint. This covers React hydration/reconciliation
+    // replacing a label after the observer was attached.
+    const frame = requestAnimationFrame(apply);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [fields]);
 
   return (
-    <div ref={rootRef} style={{ display: "contents" }}>
+    <div
+      ref={rootRef}
+      data-tree-editor-fields={fields ? "enabled" : "disabled"}
+      style={{ display: "contents" }}
+    >
       <BaseTreeEditorApp {...props} uiConfig={uiConfig} />
     </div>
   );
