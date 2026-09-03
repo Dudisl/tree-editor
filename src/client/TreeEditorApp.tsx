@@ -491,7 +491,7 @@ function PrimField({ label, val, onChange, longTextThreshold = 80 }: { label: st
   if (typeof val === "boolean")
     return <div className="field"><label><input type="checkbox" checked={val} onChange={e => onChange(e.target.checked)} /> {label}</label></div>;
   if (typeof val === "number")
-    return <div className="field"><label>{label}</label><input type="number" value={val} onChange={e => onChange(Number(e.target.value)} /></div>;
+    return <div className="field"><label>{label}</label><input type="number" value={val} onChange={e => onChange(Number(e.target.value))} /></div>;
   const s = val == null ? "" : String(val);
   const long = s.length > longTextThreshold || s.includes("\n");
   return (
@@ -510,8 +510,7 @@ function PrimArrField({ label, items, onChange }: { label: string; items: JsonPr
       {items.map((item, i) => (
         <div key={i} className="arr-row">
           <input
-            type={type === "number" ? "number" : "text"
-            }
+            type={type === "number" ? "number" : "text"}
             value={String(item ?? "")}
             onChange={e => {
               const next = [...items];
