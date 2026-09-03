@@ -8,6 +8,13 @@ type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | { [k: string]: JsonValue } | JsonValue[];
 type Seg = string | number;
 
+export type TreeEditorContext = {
+  project: string | null;
+  document: unknown;
+  selectedPath: (string | number)[] | null;
+  selectedNodeId: string | null;
+};
+
 type VNode = {
   id: string;
   cap: string;
@@ -173,6 +180,9 @@ export type TreeEditorAppProps = {
   // Host-supplied JSON "pack" controlling tree/form formatting. Omit for the
   // tool's original behavior.
   uiConfig?: TreeEditorUiConfig;
+  // Optional host callback with the exact in-memory document and current selection.
+  // This is read-only integration data: the editor remains the owner of its state.
+  onContextChange?: (context: TreeEditorContext) => void;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -481,7 +491,7 @@ function PrimField({ label, val, onChange, longTextThreshold = 80 }: { label: st
   if (typeof val === "boolean")
     return <div className="field"><label><input type="checkbox" checked={val} onChange={e => onChange(e.target.checked)} /> {label}</label></div>;
   if (typeof val === "number")
-    return <div className="field"><label>{label}</label><input type="number" value={val} onChange={e => onChange(Number(e.target.value))} /></div>;
+    return <div className="field"><label>{label}</label><input type="number" value={val} onChange={e => onChange(Number(e.target.value)} /></div>;
   const s = val == null ? "" : String(val);
   const long = s.length > longTextThreshold || s.includes("\n");
   return (
@@ -500,7 +510,8 @@ function PrimArrField({ label, items, onChange }: { label: string; items: JsonPr
       {items.map((item, i) => (
         <div key={i} className="arr-row">
           <input
-            type={type === "number" ? "number" : "text"}
+            type={type === "number" ? "number" : "text"
+            }
             value={String(item ?? "")}
             onChange={e => {
               const next = [...items];
@@ -685,6 +696,7 @@ export default function TreeEditorApp({
   enableWireframe = false,
   enableBackup = false,
   uiConfig,
+  onContextChange,
 }: TreeEditorAppProps = {}) {
   const cfg = useMemo(() => resolveUiConfig(uiConfig), [uiConfig]);
   const [doc, setDoc] = useState<JsonValue>(null);
@@ -720,6 +732,20 @@ export default function TreeEditorApp({
     if (typeof selVal === "object") return "obj";
     return "prim";
   }, [selVal]);
+
+  useEffect(() => {
+    const selectedNodeId =
+      selVal !== null && typeof selVal === "object" && !Array.isArray(selVal) &&
+      typeof (selVal as Record<string, JsonValue>).id === "string"
+        ? String((selVal as Record<string, JsonValue>).id)
+        : null;
+    onContextChange?.({
+      project,
+      document: doc,
+      selectedPath: selPath ? [...selPath] : null,
+      selectedNodeId,
+    });
+  }, [doc, project, selPath, selVal, onContextChange]);
 
   // ── Load project ─────────────────────────────────────────────────────────────
 
