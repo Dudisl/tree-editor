@@ -1380,7 +1380,7 @@ export function TreeEditorProvider({
   );
 }
 
-function TreeEditorHeader() {
+export function TreeEditorHeader() {
   const {
     project,
     projects,
