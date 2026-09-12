@@ -1,7 +1,15 @@
 "use client";
 
 import React, { useCallback, useRef } from "react";
-import BaseTreeEditorApp, { type TreeEditorAppProps } from "./TreeEditorApp";
+import BaseTreeEditorApp, {
+  type TreeEditorAppProps as BaseTreeEditorAppProps,
+} from "./TreeEditorApp";
+import {
+  ComposableTreeEditorApp,
+  type ComposableTreeEditorAppProps,
+} from "./TreeEditorComponents";
+
+export type TreeEditorAppProps = ComposableTreeEditorAppProps;
 
 // Keep presentation props referentially stable across child state renders.
 // TreeEditorApp's project-loading effect depends on callbacks/config derived
@@ -20,14 +28,26 @@ export default function StableTreeEditorApp(props: TreeEditorAppProps = {}) {
   authHeadersRef.current = props.authHeaders;
   const stableAuthHeaders = useCallback(
     () => (authHeadersRef.current ? authHeadersRef.current() : {}),
-    []
+    [],
   );
 
-  return (
-    <BaseTreeEditorApp
-      {...props}
-      authHeaders={props.authHeaders ? stableAuthHeaders : undefined}
-      uiConfig={uiConfigRef.current}
-    />
-  );
+  const stableProps = {
+    ...props,
+    authHeaders: props.authHeaders ? stableAuthHeaders : undefined,
+    uiConfig: uiConfigRef.current,
+  };
+
+  // Zero-config stays on the original component exactly, preserving the
+  // existing UI and behavior. Composition flags opt into the new wrapper.
+  if (props.showHeader !== undefined || props.showToolbar !== undefined) {
+    return <ComposableTreeEditorApp {...stableProps} />;
+  }
+
+  const {
+    showHeader: _showHeader,
+    showToolbar: _showToolbar,
+    ...baseProps
+  } = stableProps;
+
+  return <BaseTreeEditorApp {...(baseProps as BaseTreeEditorAppProps)} />;
 }
