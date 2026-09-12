@@ -15,11 +15,32 @@ export function TreeEditorProvider({ children, ...props }: TreeEditorProviderPro
         {children}
       </div>
       <style dangerouslySetInnerHTML={{ __html: `
-        .tree-editor-base-style {
+        .tree-editor-scope .header,
+        .tree-editor-scope .tree-area,
+        .tree-editor-scope .tree,
+        .tree-editor-scope .row,
+        .tree-editor-scope .card {
           color: #0f172a;
           font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
         }
-        .dark .tree-editor-base-style {
+        .tree-editor-scope .row {
+          padding: 5px 4px;
+        }
+        .tree-editor-scope .cap {
+          font-size: 14px;
+          line-height: 1.5;
+        }
+        .tree-editor-scope .tree-root,
+        .tree-editor-scope .tree-root > li,
+        .tree-editor-scope .children > li {
+          margin-top: 0;
+          margin-bottom: 0;
+        }
+        .dark .tree-editor-scope .header,
+        .dark .tree-editor-scope .tree-area,
+        .dark .tree-editor-scope .tree,
+        .dark .tree-editor-scope .row,
+        .dark .tree-editor-scope .card {
           color: #f1f5f9;
         }
       ` }} />
