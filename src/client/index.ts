@@ -1,6 +1,16 @@
 export { default as TreeEditorApp } from "./StableTreeEditorApp";
+export type { TreeEditorAppProps } from "./StableTreeEditorApp";
+export {
+  TreeEditorProvider,
+  TreeEditorTree,
+  TreeEditorNodeForm,
+} from "./TreeEditorComponents";
 export type {
-  TreeEditorAppProps,
+  TreeEditorProviderProps,
+  TreeEditorTreeProps,
+} from "./TreeEditorComponents";
+export type {
+  TreeEditorContext,
   TreeEditorUiConfig,
   TreeEditorFieldUiConfig,
   TreeEditorRelValue,
