@@ -23,19 +23,33 @@ export function TreeEditorProvider({ children, ...props }: TreeEditorProviderPro
           color: #0f172a;
           font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
         }
+
+        /* Keep the extracted tree visually compact. These rules are local to
+           the composable API and do not change the legacy <TreeEditorApp />. */
         .tree-editor-scope .row {
-          padding: 5px 4px;
+          padding: 2px 4px;
+          min-height: 0;
         }
         .tree-editor-scope .cap {
           font-size: 14px;
-          line-height: 1.5;
+          line-height: 1.3;
         }
         .tree-editor-scope .tree-root,
         .tree-editor-scope .tree-root > li,
         .tree-editor-scope .children > li {
-          margin-top: 0;
-          margin-bottom: 0;
+          margin: 0;
+          padding-top: 0;
+          padding-bottom: 0;
         }
+        .tree-editor-scope .drop-gap {
+          height: 0;
+          margin: 0;
+        }
+        .tree-editor-scope .drop-gap.dragging,
+        .tree-editor-scope .drop-gap.active {
+          height: 6px;
+        }
+
         .dark .tree-editor-scope .header,
         .dark .tree-editor-scope .tree-area,
         .dark .tree-editor-scope .tree,
