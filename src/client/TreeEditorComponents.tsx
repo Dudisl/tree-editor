@@ -1666,6 +1666,7 @@ export function ComposableTreeEditorApp({
 function TreeEditorStyles() {
   return <style dangerouslySetInnerHTML={{ __html: `
     .tree-editor-scope, .tree-editor-scope * { box-sizing: border-box; }
+    .tree-editor-scope { color: #0f172a; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
     .tree-editor-scope .page { min-height: 100vh; background: #f6f7fb; color: #0f172a; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
     .tree-editor-scope .header { max-width: 1200px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .tree-editor-scope .header h1 { margin: 0; font-size: 22px; font-weight: 700; }
@@ -1736,6 +1737,7 @@ function TreeEditorStyles() {
     .tree-editor-scope .wireframe-body pre { font-size: 12px; line-height: 1.6; font-family: monospace; background: #f8fafc; padding: 16px; border-radius: 8px; white-space: pre-wrap; margin: 0; border: 1px solid #e2e8f0; overflow-x: hidden; max-width: 100%; word-break: break-word; }
     .tree-editor-scope .wireframe-loading { text-align: center; padding: 60px; color: #64748b; font-size: 14px; }
 
+    .dark .tree-editor-scope { color: #f1f5f9; }
     .dark .tree-editor-scope .page { background: #0a0a0a; color: #f1f5f9; }
     .dark .tree-editor-scope .header h1 { color: #f8fafc; }
     .dark .tree-editor-scope .project-picker label { color: #cbd5e1; }
