@@ -1076,15 +1076,23 @@ export function TreeEditorProvider({
   const moveUp = () => {
     if (!selPath?.length) return;
     const n = swapAt(doc, selPath, -1);
+    if (n === doc) return;
+    setUndoDoc(doc);
     handleDocChange(n);
     saveDoc(n);
+    const last = selPath[selPath.length - 1];
+    if (typeof last === "number") selectAndReveal([...selPath.slice(0, -1), last - 1]);
   };
 
   const moveDown = () => {
     if (!selPath?.length) return;
     const n = swapAt(doc, selPath, 1);
+    if (n === doc) return;
+    setUndoDoc(doc);
     handleDocChange(n);
     saveDoc(n);
+    const last = selPath[selPath.length - 1];
+    if (typeof last === "number") selectAndReveal([...selPath.slice(0, -1), last + 1]);
   };
 
   const expandAll = () => setExpanded(new Set(collectIds(forest, 999)));
@@ -1798,7 +1806,29 @@ function TreeEditorStyles() {
     .tree-editor-scope.dark .add-btn:hover { background: #312e81; }
     .tree-editor-scope.dark .row.drop-target { background: #14532d !important; outline-color: #22c55e; }
     .tree-editor-scope.dark .row.drop-invalid { background: #450a0a !important; outline-color: #ef4444; }
-    .tree-editor-scope.dark .save-error { background: #450a0a; border-color: #7f1d1d; color: #fca5a5; }
+    .tree-editor-scope.dark .save-error { background: #450a0a; border-color: #7f1d1d; color: #fff; }
+    .tree-editor-scope.dark { color: #fff; }
+    .tree-editor-scope.dark .header h1,
+    .tree-editor-scope.dark .project-picker label,
+    .tree-editor-scope.dark .save-btn,
+    .tree-editor-scope.dark .card h2,
+    .tree-editor-scope.dark .placeholder,
+    .tree-editor-scope.dark .meta,
+    .tree-editor-scope.dark .field > label,
+    .tree-editor-scope.dark .key-field > label,
+    .tree-editor-scope.dark .obj-arr-item-header,
+    .tree-editor-scope.dark .nested-note,
+    .tree-editor-scope.dark .toggle,
+    .tree-editor-scope.dark .kind-icon,
+    .tree-editor-scope.dark .cap,
+    .tree-editor-scope.dark .add-btn,
+    .tree-editor-scope.dark .wireframe-header h2,
+    .tree-editor-scope.dark .wireframe-loading { color: #fff; }
+    .tree-editor-scope.dark input,
+    .tree-editor-scope.dark textarea,
+    .tree-editor-scope.dark select,
+    .tree-editor-scope.dark button,
+    .tree-editor-scope.dark .wireframe-body pre { color: #fff; }
     .tree-editor-scope.dark .theme-toggle { background: #1f1f1f; color: #f8fafc; border-color: #555; }
     .tree-editor-scope.dark .theme-toggle:hover { background: #303030; }
     .tree-editor-scope.dark .wireframe-modal, .tree-editor-scope.dark .wireframe-header { background: #161616; border-color: #333; }
