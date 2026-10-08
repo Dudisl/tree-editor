@@ -789,6 +789,8 @@ type StateValue = {
 };
 
 const TreeEditorStateContext = createContext<StateValue | null>(null);
+const TreeEditorThemeContext = createContext<{ dark: boolean; toggle: () => void } | null>(null);
+const TREE_EDITOR_THEME_KEY = "tree-editor-theme";
 
 function useTreeEditorState(): StateValue {
   const ctx = useContext(TreeEditorStateContext);
@@ -805,6 +807,21 @@ export function TreeEditorProvider({
   children,
 }: TreeEditorProviderProps) {
   const cfg = useMemo(() => resolveUiConfig(uiConfig), [uiConfig]);
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    try {
+      setDark(window.localStorage.getItem(TREE_EDITOR_THEME_KEY) === "dark");
+    } catch {
+      // Storage can be unavailable; the toggle still works in this session.
+    }
+  }, []);
+  const toggleTheme = useCallback(() => {
+    setDark(previous => {
+      const next = !previous;
+      try { window.localStorage.setItem(TREE_EDITOR_THEME_KEY, next ? "dark" : "light"); } catch {}
+      return next;
+    });
+  }, []);
   const [doc, setDoc] = useState<JsonValue>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selPath, setSelPath] = useState<Seg[] | null>(null);
@@ -1371,16 +1388,19 @@ export function TreeEditorProvider({
 
   return (
     <TreeEditorStateContext.Provider value={value}>
-      <div className="tree-editor-scope" style={{ display: "contents" }}>
-        {children}
-        <WireframeOverlay />
-      </div>
-      <TreeEditorStyles />
+      <TreeEditorThemeContext.Provider value={{ dark, toggle: toggleTheme }}>
+        <div className={`tree-editor-scope${dark ? " dark" : ""}`} style={{ display: "contents" }}>
+          {children}
+          <WireframeOverlay />
+        </div>
+        <TreeEditorStyles />
+      </TreeEditorThemeContext.Provider>
     </TreeEditorStateContext.Provider>
   );
 }
 
 export function TreeEditorHeader() {
+  const theme = useContext(TreeEditorThemeContext);
   const {
     project,
     projects,
@@ -1419,6 +1439,16 @@ export function TreeEditorHeader() {
         title={dirty ? "Unsaved changes — click to save" : "No unsaved changes"}
       >
         {dirty ? "● Save" : "Saved"}
+      </button>
+      <button
+        type="button"
+        className="theme-toggle"
+        onClick={() => theme?.toggle()}
+        aria-label={theme?.dark ? "Switch to light mode" : "Switch to dark mode"}
+        aria-pressed={theme?.dark ?? false}
+        title={theme?.dark ? "Light mode" : "Dark mode"}
+      >
+        {theme?.dark ? "☀" : "☾"}
       </button>
     </div>
   );
@@ -1670,6 +1700,8 @@ function TreeEditorStyles() {
     .tree-editor-scope .page { min-height: 100vh; background: #f6f7fb; color: #0f172a; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
     .tree-editor-scope .header { max-width: 1200px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .tree-editor-scope .header h1 { margin: 0; font-size: 22px; font-weight: 700; }
+    .tree-editor-scope .theme-toggle { font-size: 19px; line-height: 1; min-width: 36px; height: 34px; display: inline-flex; align-items: center; justify-content: center; }
+    .tree-editor-scope .theme-toggle:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
     .tree-editor-scope .project-picker label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #475569; }
     .tree-editor-scope .project-picker span { font-weight: 600; }
     .tree-editor-scope .project-picker select { min-width: 180px; }
@@ -1737,35 +1769,40 @@ function TreeEditorStyles() {
     .tree-editor-scope .wireframe-body pre { font-size: 12px; line-height: 1.6; font-family: monospace; background: #f8fafc; padding: 16px; border-radius: 8px; white-space: pre-wrap; margin: 0; border: 1px solid #e2e8f0; overflow-x: hidden; max-width: 100%; word-break: break-word; }
     .tree-editor-scope .wireframe-loading { text-align: center; padding: 60px; color: #64748b; font-size: 14px; }
 
-    .dark .tree-editor-scope { color: #f1f5f9; }
-    .dark .tree-editor-scope .page { background: #0a0a0a; color: #f1f5f9; }
-    .dark .tree-editor-scope .header h1 { color: #f8fafc; }
-    .dark .tree-editor-scope .project-picker label { color: #cbd5e1; }
-    .dark .tree-editor-scope .save-btn { background: #1f1f1f; color: #94a3b8; border-color: #444; }
-    .dark .tree-editor-scope .save-btn.dirty { background: #ef4444; color: #fff; border-color: #dc2626; }
-    .dark .tree-editor-scope .card { background: #161616; border-color: #333; }
-    .dark .tree-editor-scope .card h2 { color: #94a3b8; border-bottom-color: #262626; }
-    .dark .tree-editor-scope .placeholder, .dark .tree-editor-scope .meta { color: #94a3b8; }
-    .dark .tree-editor-scope .field > label { color: #cbd5e1; }
-    .dark .tree-editor-scope .key-field { border-bottom-color: #3730a3; }
-    .dark .tree-editor-scope .key-field > label { color: #a5b4fc; }
-    .dark .tree-editor-scope .nested { border-left-color: #333; }
-    .dark .tree-editor-scope .obj-arr-item-header { color: #64748b; }
-    .dark .tree-editor-scope .nested-note { background: #1a1a1a; border-color: #333; color: #94a3b8; }
-    .dark .tree-editor-scope input, .dark .tree-editor-scope textarea, .dark .tree-editor-scope select { background: #1f1f1f; color: #f1f5f9; border-color: #444; }
-    .dark .tree-editor-scope input:focus, .dark .tree-editor-scope textarea:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,.2); }
-    .dark .tree-editor-scope button { background: #1f1f1f; color: #f1f5f9; border-color: #444; }
-    .dark .tree-editor-scope button:hover:not(:disabled) { background: #2a2a2a; }
-    .dark .tree-editor-scope .toolbar, .dark .tree-editor-scope .tree { background: #161616; border-color: #333; }
-    .dark .tree-editor-scope .row:hover { background: #1f2937; }
-    .dark .tree-editor-scope .row.selected { background: #1e293b; outline-color: #3b82f6; }
-    .dark .tree-editor-scope .toggle, .dark .tree-editor-scope .kind-icon { color: #94a3b8; }
-    .dark .tree-editor-scope .cap { color: #f8fafc; }
-    .dark .tree-editor-scope .children { border-left-color: #262626; }
-    .dark .tree-editor-scope .add-btn { background: #1e1b4b; border-color: #3730a3; color: #a5b4fc; }
-    .dark .tree-editor-scope .add-btn:hover { background: #312e81; }
-    .dark .tree-editor-scope .row.drop-target { background: #14532d !important; outline-color: #22c55e; }
-    .dark .tree-editor-scope .row.drop-invalid { background: #450a0a !important; outline-color: #ef4444; }
-    .dark .tree-editor-scope .save-error { background: #450a0a; border-color: #7f1d1d; color: #fca5a5; }
+    .tree-editor-scope.dark { color: #f1f5f9; }
+    .tree-editor-scope.dark .page { background: #0a0a0a; color: #f1f5f9; }
+    .tree-editor-scope.dark .header h1 { color: #f8fafc; }
+    .tree-editor-scope.dark .project-picker label { color: #cbd5e1; }
+    .tree-editor-scope.dark .save-btn { background: #1f1f1f; color: #94a3b8; border-color: #444; }
+    .tree-editor-scope.dark .save-btn.dirty { background: #ef4444; color: #fff; border-color: #dc2626; }
+    .tree-editor-scope.dark .card { background: #161616; border-color: #333; }
+    .tree-editor-scope.dark .card h2 { color: #94a3b8; border-bottom-color: #262626; }
+    .tree-editor-scope.dark .placeholder, .tree-editor-scope.dark .meta { color: #94a3b8; }
+    .tree-editor-scope.dark .field > label { color: #cbd5e1; }
+    .tree-editor-scope.dark .key-field { border-bottom-color: #3730a3; }
+    .tree-editor-scope.dark .key-field > label { color: #a5b4fc; }
+    .tree-editor-scope.dark .nested { border-left-color: #333; }
+    .tree-editor-scope.dark .obj-arr-item-header { color: #64748b; }
+    .tree-editor-scope.dark .nested-note { background: #1a1a1a; border-color: #333; color: #94a3b8; }
+    .tree-editor-scope.dark input, .tree-editor-scope.dark textarea, .tree-editor-scope.dark select { background: #1f1f1f; color: #f1f5f9; border-color: #444; }
+    .tree-editor-scope.dark input:focus, .tree-editor-scope.dark textarea:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,.2); }
+    .tree-editor-scope.dark button { background: #1f1f1f; color: #f1f5f9; border-color: #444; }
+    .tree-editor-scope.dark button:hover:not(:disabled) { background: #2a2a2a; }
+    .tree-editor-scope.dark .toolbar, .tree-editor-scope.dark .tree { background: #161616; border-color: #333; }
+    .tree-editor-scope.dark .row:hover { background: #1f2937; }
+    .tree-editor-scope.dark .row.selected { background: #1e293b; outline-color: #3b82f6; }
+    .tree-editor-scope.dark .toggle, .tree-editor-scope.dark .kind-icon { color: #94a3b8; }
+    .tree-editor-scope.dark .cap { color: #f8fafc; }
+    .tree-editor-scope.dark .children { border-left-color: #262626; }
+    .tree-editor-scope.dark .add-btn { background: #1e1b4b; border-color: #3730a3; color: #a5b4fc; }
+    .tree-editor-scope.dark .add-btn:hover { background: #312e81; }
+    .tree-editor-scope.dark .row.drop-target { background: #14532d !important; outline-color: #22c55e; }
+    .tree-editor-scope.dark .row.drop-invalid { background: #450a0a !important; outline-color: #ef4444; }
+    .tree-editor-scope.dark .save-error { background: #450a0a; border-color: #7f1d1d; color: #fca5a5; }
+    .tree-editor-scope.dark .theme-toggle { background: #1f1f1f; color: #f8fafc; border-color: #555; }
+    .tree-editor-scope.dark .theme-toggle:hover { background: #303030; }
+    .tree-editor-scope.dark .wireframe-modal, .tree-editor-scope.dark .wireframe-header { background: #161616; border-color: #333; }
+    .tree-editor-scope.dark .wireframe-header h2 { color: #f8fafc; }
+    .tree-editor-scope.dark .wireframe-body pre { background: #1f1f1f; color: #f1f5f9; border-color: #444; }
   ` }} />;
 }
