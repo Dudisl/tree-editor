@@ -1324,7 +1324,12 @@ export default function TreeEditorApp({
         </section>
 
         <section className="right">
-          <div className="card" onBlur={() => saveDoc()}>
+          <div className="card" onBlur={e => {
+            // Moving focus between form controls (including preview and direction
+            // buttons) must not trigger an unnecessary save request.
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            if (dirty) saveDoc();
+          }}>
             <h2>{breadcrumb}</h2>
             {rightPanel()}
             {selPath && selPath.length > 0 && (
