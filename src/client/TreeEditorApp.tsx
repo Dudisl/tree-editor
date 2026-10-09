@@ -1,4 +1,5 @@
 "use client";
+import TextAreaField from "./TextAreaField";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
@@ -497,7 +498,7 @@ function PrimField({ label, val, onChange, longTextThreshold = 80 }: { label: st
   return (
     <div className="field">
       <label>{label}</label>
-      {long ? <textarea rows={5} value={s} onChange={e => onChange(e.target.value)} /> : <input value={s} onChange={e => onChange(e.target.value)} onPaste={e => {
+      {long ? <TextAreaField value={s} onChange={onChange} /> : <input value={s} onChange={e => onChange(e.target.value)} onPaste={e => {
           const pasted = e.clipboardData.getData("text/plain");
           if (!/[\r\n]/.test(pasted)) return;
           e.preventDefault();
