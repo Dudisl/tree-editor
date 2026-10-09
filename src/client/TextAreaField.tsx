@@ -29,7 +29,47 @@ const markdownComponents = {
   ),
 };
 
+
+// Restore table syntax escaped by rich-text copy. Preview only; JSON stays intact.
+function normalizeMarkdownForPreview(source: string): string {
+  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  const result: string[] = [];
+  let inFence = false;
+  const unescapeFirstPipe = (line: string) => line.replace(/^(\s*)\\\|/, "$1|");
+  const cells = (line: string) => unescapeFirstPipe(line).trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+  const divider = (line: string) => {
+    const parts = cells(line);
+    return parts.length >= 2 && parts.every(c => /^:?-{3,}:?$/.test(c));
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:\x60{3,}|~{3,})/.test(line)) {
+      inFence = !inFence;
+      result.push(line);
+      continue;
+    }
+    if (inFence) { result.push(line); continue; }
+    const header = unescapeFirstPipe(line);
+    const next = i + 1 < lines.length ? unescapeFirstPipe(lines[i + 1]) : "";
+    if (header.includes("|") && divider(next) && cells(header).length === cells(next).length) {
+      if (result.length && result[result.length - 1].trim()) result.push("");
+      result.push(header, next);
+      i++;
+      while (i + 1 < lines.length) {
+        const row = unescapeFirstPipe(lines[i + 1]);
+        if (!row.trim() || !row.includes("|") || cells(row).length !== cells(header).length) break;
+        result.push(row);
+        i++;
+      }
+      continue;
+    }
+    result.push(line);
+  }
+  return result.join("\n");
+}
+
 export default function TextAreaField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const previewMarkdown = normalizeMarkdownForPreview(value);
   const [preview, setPreview] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
   const [height, setHeight] = useState(220);
@@ -62,7 +102,7 @@ export default function TextAreaField({ value, onChange }: { value: string; onCh
         <div dir={direction} style={{ height, boxSizing: "border-box", padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: 8, overflow: "auto" }}>
           {value ? (
             <div style={{ lineHeight: 1.6, overflowWrap: "anywhere" }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{value}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{previewMarkdown}</ReactMarkdown>
             </div>
           ) : <span style={{ opacity: .6 }}>Nothing to preview</span>}
         </div>
