@@ -1551,6 +1551,7 @@ export function TreeEditorNodeForm() {
     handleDocChange,
     addSub,
     saveDoc,
+    dirty,
     breadcrumb,
   } = useTreeEditorState();
 
