@@ -479,7 +479,15 @@ function PrimField({
       <label>{label}</label>
       {long
         ? <textarea rows={5} value={s} onChange={e => onChange(e.target.value)} />
-        : <input value={s} onChange={e => onChange(e.target.value)} />}
+        : <input value={s} onChange={e => onChange(e.target.value)} onPaste={e => {
+          const pasted = e.clipboardData.getData("text/plain");
+          if (!/[\r\n]/.test(pasted)) return;
+          e.preventDefault();
+          const input = e.currentTarget;
+          const start = input.selectionStart ?? s.length;
+          const end = input.selectionEnd ?? start;
+          onChange(s.slice(0, start) + pasted.replace(/\r\n?/g, "\n") + s.slice(end));
+        }} />}
     </div>
   );
 }
