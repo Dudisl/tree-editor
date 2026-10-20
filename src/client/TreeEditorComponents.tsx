@@ -740,7 +740,16 @@ function VNodeRow({
   );
 }
 
-export type TreeEditorProviderProps = BaseTreeEditorAppProps & {
+export type JsonPath = (string | number)[];
+export type TreeAction = { caption: string; handlerName: string };
+export type HandlerRequest = { handlerName: string; project: string; nodePath: JsonPath };
+export type HandlerResult = { success: boolean; error?: string };
+export type TreeEditorActionProps = {
+  actions?: TreeAction[];
+  onAction?: (request: HandlerRequest) => Promise<HandlerResult>;
+};
+
+export type TreeEditorProviderProps = BaseTreeEditorAppProps & TreeEditorActionProps & {
   children: React.ReactNode;
 };
 
@@ -748,7 +757,7 @@ export type TreeEditorTreeProps = {
   showToolbar?: boolean;
 };
 
-export type ComposableTreeEditorAppProps = BaseTreeEditorAppProps & {
+export type ComposableTreeEditorAppProps = BaseTreeEditorAppProps & TreeEditorActionProps & {
   showHeader?: boolean;
   showToolbar?: boolean;
 };
@@ -790,8 +799,14 @@ type StateValue = {
   collapseAll: () => void;
   handleUndo: () => void;
   handleWireframe: () => Promise<void>;
-  saveDoc: (d?: JsonValue) => void;
-  loadProject: (name?: string | null) => Promise<void>;
+  saveDoc: (d?: JsonValue) => Promise<boolean>;
+  loadProject: (name?: string | null) => Promise<boolean>;
+  actions: TreeAction[];
+  actionRunning: boolean;
+  actionError: string | null;
+  reloadFailed: boolean;
+  runAction: (handlerName: string) => Promise<void>;
+  retryReload: () => Promise<void>;
   createProject: () => Promise<void>;
   backup: () => void;
   breadcrumb: string;
@@ -813,6 +828,8 @@ export function TreeEditorProvider({
   enableBackup = false,
   uiConfig,
   onContextChange,
+  actions = [],
+  onAction,
   children,
 }: TreeEditorProviderProps) {
   const cfg = useMemo(() => resolveUiConfig(uiConfig), [uiConfig]);
@@ -842,6 +859,11 @@ export function TreeEditorProvider({
   const [undoDoc, setUndoDoc] = useState<JsonValue | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState<string[] | null>(null);
+  const [actionRunning, setActionRunning] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [reloadFailed, setReloadFailed] = useState(false);
+  const actionLock = useRef(false);
+  const pendingSave = useRef<Promise<boolean>>(Promise.resolve(true));
   const [isDragging, setIsDragging] = useState(false);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [dropInvalid, setDropInvalid] = useState(false);
@@ -884,9 +906,8 @@ export function TreeEditorProvider({
     [authHeadersProp],
   );
 
-  const loadProject = useCallback(async (name?: string | null) => {
+  const loadProject = useCallback(async (name?: string | null): Promise<boolean> => {
     setLoaded(false);
-    setDirty(false);
     try {
       const params = new URLSearchParams();
       if (name) params.set("project", name);
@@ -905,14 +926,19 @@ export function TreeEditorProvider({
         ? Array.from(new Set([...available, active])).sort((a, b) => a.localeCompare(b))
         : available);
       setProject(active);
+      if (!("document" in data)) throw new Error("Missing document in load response");
       const newDoc = data.document ?? null;
       setDoc(newDoc);
       setSelPath(null);
       setSelId(null);
       const initForest = buildForest(newDoc, new Set(), cfg);
       setExpanded(new Set(collectIds(initForest, 1)));
+      setDirty(false);
+      setReloadFailed(false);
+      return true;
     } catch {
-      setDoc(null);
+      setReloadFailed(true);
+      return false;
     } finally {
       setLoaded(true);
     }
@@ -923,29 +949,78 @@ export function TreeEditorProvider({
   const docRef = useRef<JsonValue>(doc);
   useEffect(() => { docRef.current = doc; }, [doc]);
 
-  const saveDoc = useCallback((d: JsonValue = docRef.current) => {
-    if (!loaded || !project || d == null) return;
-    setDirty(false);
-    setSaveError(null);
-    fetch("/api/treeEditor/tree", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ project, document: d }),
-    }).then(async res => {
-      if (!res.ok) {
-        setDirty(true);
-        try {
-          const body = await res.json() as { errors?: string[]; error?: string };
-          setSaveError(body.errors ?? (body.error ? [body.error] : ["Save failed"]));
-        } catch {
-          setSaveError(["Save failed"]);
+  const saveDoc = useCallback((d: JsonValue = docRef.current): Promise<boolean> => {
+    if (!loaded || !project || d == null) return Promise.resolve(false);
+    const save = async (): Promise<boolean> => {
+      setSaveError(null);
+      try {
+        const res = await fetch("/api/treeEditor/tree", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ project, document: d }),
+        });
+        if (!res.ok) {
+          let message = ["Save failed"];
+          try {
+            const body = await res.json() as { errors?: string[]; error?: string };
+            message = body.errors ?? (body.error ? [body.error] : message);
+          } catch {}
+          setSaveError(message);
+          setDirty(true);
+          return false;
         }
+        if (docRef.current === d) setDirty(false);
+        return true;
+      } catch {
+        setSaveError(["Save failed — network error"]);
+        setDirty(true);
+        return false;
       }
-    }).catch(() => {
-      setDirty(true);
-      setSaveError(["Save failed — network error"]);
-    });
+    };
+    // Serialize all writes so an older autosave cannot overwrite handler input.
+    const result = pendingSave.current.then(save, save);
+    pendingSave.current = result;
+    return result;
   }, [loaded, project, authHeaders]);
+
+  const runAction = useCallback(async (handlerName: string) => {
+    if (actionLock.current || reloadFailed || !onAction || !project || !selPath ||
+        !actions.some(a => a.handlerName === handlerName)) return;
+    actionLock.current = true;
+    const request: HandlerRequest = { handlerName, project, nodePath: [...selPath] };
+    setActionRunning(true);
+    setActionError(null);
+    try {
+      // Always flush the latest document, including any form edit not yet autosaved.
+      // This also waits for all earlier queued autosaves.
+      if (!await saveDoc(docRef.current)) throw new Error("Failed to save changes");
+      const result: unknown = await onAction(request);
+      if (!result || typeof result !== "object" ||
+          !("success" in result) || typeof result.success !== "boolean" ||
+          (result.error !== undefined && typeof result.error !== "string"))
+        throw new Error("Invalid handler response");
+      if (!result.success) throw new Error(result.error || "Action failed");
+      if (!await loadProject(request.project)) throw new Error("Reload failed");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Action failed");
+    } finally {
+      actionLock.current = false;
+      setActionRunning(false);
+    }
+  }, [actions, loadProject, onAction, project, reloadFailed, saveDoc, selPath]);
+
+  const retryReload = useCallback(async () => {
+    if (actionLock.current || !project) return;
+    actionLock.current = true;
+    setActionRunning(true);
+    setActionError(null);
+    try {
+      if (!await loadProject(project)) setActionError("Reload failed");
+    } finally {
+      actionLock.current = false;
+      setActionRunning(false);
+    }
+  }, [loadProject, project]);
 
   useEffect(() => {
     if (selPath && selPath.length > 0) {
@@ -1374,6 +1449,12 @@ export function TreeEditorProvider({
     handleWireframe,
     saveDoc,
     loadProject,
+    actions,
+    actionRunning,
+    actionError,
+    reloadFailed,
+    runAction,
+    retryReload,
     createProject,
     backup,
     breadcrumb,
@@ -1400,6 +1481,12 @@ export function TreeEditorProvider({
     dnd,
     saveDoc,
     loadProject,
+    actions,
+    actionRunning,
+    actionError,
+    reloadFailed,
+    runAction,
+    retryReload,
     breadcrumb,
   ]);
 
@@ -1407,8 +1494,26 @@ export function TreeEditorProvider({
     <TreeEditorStateContext.Provider value={value}>
       <TreeEditorThemeContext.Provider value={{ dark, toggle: toggleTheme }}>
         <div className={`tree-editor-scope${dark ? " dark" : ""}`} style={{ display: "contents" }}>
-          {children}
+          <div style={reloadFailed ? { pointerEvents: "none", opacity: 0.55 } : undefined}
+            aria-disabled={reloadFailed}>
+            {children}
+          </div>
+          {reloadFailed && <div role="alert" style={{ position: "fixed", zIndex: 2147483646, left: "50%", top: "40%", transform: "translateX(-50%)", background: "white", padding: 24, border: "2px solid #dc2626" }}>
+            Reload failed. Editing is disabled.
+            <button onClick={() => { void retryReload(); }}>Retry Reload</button>
+          </div>}
           <WireframeOverlay />
+          {actionRunning && (
+            <div role="status" aria-live="polite" style={{
+              position: "fixed", inset: 0, zIndex: 2147483647,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexDirection: "column", gap: 12,
+              background: "rgba(15,23,42,.65)", color: "white",
+            }}>
+              <div className="tree-action-spinner" aria-hidden="true" />
+              <strong>Processing...</strong>
+            </div>
+          )}
         </div>
         <TreeEditorStyles />
       </TreeEditorThemeContext.Provider>
@@ -1492,12 +1597,22 @@ export function TreeEditorTree({ showToolbar = true }: TreeEditorTreeProps = {})
     collapseAll,
     backup,
     handleUndo,
+    actions,
+    runAction,
+    actionRunning,
   } = useTreeEditorState();
 
   return (
     <div className="tree-area">
       {showToolbar && (
         <div className="toolbar">
+          {actions.length > 0 && (
+            <select aria-label="Tree actions" value="" disabled={!selId || actionRunning}
+              onChange={e => { if (e.target.value) void runAction(e.target.value); }}>
+              <option value="">Select action…</option>
+              {actions.map(a => <option key={a.handlerName} value={a.handlerName}>{a.caption}</option>)}
+            </select>
+          )}
           <button onClick={addRoot}>+ Root</button>
           <button onClick={addSub} disabled={!selId || selKind === "prim"}>+ Child</button>
           <button onClick={moveUp} disabled={!selId}>↑</button>
@@ -1654,6 +1769,15 @@ export function TreeEditorNodeForm() {
   );
 }
 
+function TreeActionErrors() {
+  const { actionError, reloadFailed, retryReload } = useTreeEditorState();
+  if (!actionError && !reloadFailed) return null;
+  return <div role="alert" style={{ padding: 12, background: "#fee2e2", color: "#991b1b" }}>
+    {actionError || "Project reload failed. Editing is disabled."}
+    {reloadFailed && <button onClick={() => { void retryReload(); }} style={{ marginLeft: 12 }}>Retry Reload</button>}
+  </div>;
+}
+
 function SaveError() {
   const { saveError } = useTreeEditorState();
   if (!saveError) return null;
@@ -1703,6 +1827,7 @@ export function ComposableTreeEditorApp({
       <div className="page" dir="ltr">
         {showHeader && <TreeEditorHeader />}
         <SaveError />
+        <TreeActionErrors />
         <div className="content">
           <section className="left">
             <TreeEditorTree showToolbar={showToolbar} />
@@ -1718,6 +1843,8 @@ export function ComposableTreeEditorApp({
 
 function TreeEditorStyles() {
   return <style dangerouslySetInnerHTML={{ __html: `
+.tree-editor-scope .tree-action-spinner { width: 36px; height: 36px; border: 4px solid #ffffff55; border-top-color: white; border-radius: 50%; animation: tree-action-spin .8s linear infinite; }
+    @keyframes tree-action-spin { to { transform: rotate(360deg); } }
     .tree-editor-scope, .tree-editor-scope * { box-sizing: border-box; }
     .tree-editor-scope { color: #0f172a; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
     .tree-editor-scope .page { min-height: 100vh; background: #f6f7fb; color: #0f172a; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
