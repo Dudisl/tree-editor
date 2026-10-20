@@ -1,0 +1,4 @@
+node_modules/
+.next/
+.demo-data/
+tsconfig.tsbuildinfo
