@@ -923,12 +923,13 @@ export function TreeEditorProvider({
         .filter((p): p is string => typeof p === "string")
         .sort((a, b) => a.localeCompare(b));
       const active = typeof data.project === "string" ? data.project : name ?? available[0] ?? null;
+      if (active && !("document" in data))
+        throw new Error("Missing document in load response");
+      const newDoc = data.document ?? null;
       setProjects(active
         ? Array.from(new Set([...available, active])).sort((a, b) => a.localeCompare(b))
         : available);
       setProject(active);
-      if (!("document" in data)) throw new Error("Missing document in load response");
-      const newDoc = data.document ?? null;
       setDoc(newDoc);
       setSelPath(null);
       setSelId(null);
