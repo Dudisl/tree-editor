@@ -802,6 +802,7 @@ type StateValue = {
   saveDoc: (d?: JsonValue) => Promise<boolean>;
   loadProject: (name?: string | null) => Promise<boolean>;
   actions: TreeAction[];
+  actionsEnabled: boolean;
   actionRunning: boolean;
   actionError: string | null;
   reloadFailed: boolean;
@@ -994,9 +995,10 @@ export function TreeEditorProvider({
       // Always flush the latest document, including any form edit not yet autosaved.
       // This also waits for all earlier queued autosaves.
       if (!await saveDoc(docRef.current)) throw new Error("Failed to save changes");
-      const result: unknown = await onAction(request);
-      if (!result || typeof result !== "object" ||
-          !("success" in result) || typeof result.success !== "boolean" ||
+      const raw: unknown = await onAction(request);
+      if (!raw || typeof raw !== "object") throw new Error("Invalid handler response");
+      const result = raw as Partial<HandlerResult>;
+      if (typeof result.success !== "boolean" ||
           (result.error !== undefined && typeof result.error !== "string"))
         throw new Error("Invalid handler response");
       if (!result.success) throw new Error(result.error || "Action failed");
@@ -1450,6 +1452,7 @@ export function TreeEditorProvider({
     saveDoc,
     loadProject,
     actions,
+    actionsEnabled: typeof onAction === "function",
     actionRunning,
     actionError,
     reloadFailed,
@@ -1482,6 +1485,7 @@ export function TreeEditorProvider({
     saveDoc,
     loadProject,
     actions,
+    onAction,
     actionRunning,
     actionError,
     reloadFailed,
@@ -1598,6 +1602,7 @@ export function TreeEditorTree({ showToolbar = true }: TreeEditorTreeProps = {})
     backup,
     handleUndo,
     actions,
+    actionsEnabled,
     runAction,
     actionRunning,
   } = useTreeEditorState();
@@ -1607,7 +1612,7 @@ export function TreeEditorTree({ showToolbar = true }: TreeEditorTreeProps = {})
       {showToolbar && (
         <div className="toolbar">
           {actions.length > 0 && (
-            <select aria-label="Tree actions" value="" disabled={!selId || actionRunning}
+            <select aria-label="Tree actions" value="" disabled={!selId || !actionsEnabled || actionRunning}
               onChange={e => { if (e.target.value) void runAction(e.target.value); }}>
               <option value="">Select action…</option>
               {actions.map(a => <option key={a.handlerName} value={a.handlerName}>{a.caption}</option>)}
