@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     const obj = node as Record<string, unknown>;
     if (body.handlerName === "create") {
       if (!Array.isArray(obj.children)) obj.children = [];
-      obj.children.push({ name: "Generated " + new Date().toISOString(), outcome: "Created by demo handler", children: [] });
+      (obj.children as unknown[]).push({ name: "Generated " + new Date().toISOString(), outcome: "Created by demo handler", children: [] });
     } else {
       obj.outcome = "Decomposed at " + new Date().toISOString();
     }
