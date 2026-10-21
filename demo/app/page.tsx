@@ -38,7 +38,7 @@ export default function Page() {
       <span>Choose a node, then an action in the tree toolbar.</span>
     </aside>
     <TreeEditorApp actions={ACTIONS} onAction={onAction} showHeader showToolbar
-      authHeaders={() => mode === "save-error" ? { "x-demo-fail-save": "1" } : {}} />
+      authHeaders={() => mode === "save-error" ? { "x-demo-fail-save": "1" } : new Headers()} />
     <section style={{padding:16,fontFamily:"monospace"}}>
       <strong>Handler calls (newest first)</strong>
       <button style={{marginLeft:12}} onClick={() => setEvents([])}>Clear</button>
