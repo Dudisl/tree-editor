@@ -14,3 +14,5 @@ export type {
   TreeEditorFieldUiConfig,
   TreeEditorRelValue,
 } from "./TreeEditorApp";
+
+export type { JsonPath, TreeAction, HandlerRequest, HandlerResult, TreeEditorActionProps } from "./TreeEditorComponents";

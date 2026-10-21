@@ -39,7 +39,7 @@ export default function StableTreeEditorApp(props: TreeEditorAppProps = {}) {
 
   // Zero-config stays on the original component exactly, preserving the
   // existing UI and behavior. Composition flags opt into the new wrapper.
-  if (props.showHeader !== undefined || props.showToolbar !== undefined) {
+  if (props.showHeader !== undefined || props.showToolbar !== undefined || (props.actions?.length ?? 0) > 0) {
     return <ComposableTreeEditorApp {...stableProps} />;
   }
 
