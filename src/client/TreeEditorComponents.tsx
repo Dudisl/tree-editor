@@ -1538,7 +1538,8 @@ export function TreeEditorHeader() {
   } = useTreeEditorState();
 
   return (
-    <div className="header">
+    <>
+      <div className="header">
       <h1>Tree Editor</h1>
       <div className="project-picker">
         <label>
@@ -1577,7 +1578,9 @@ export function TreeEditorHeader() {
       >
         {theme?.dark ? "☀" : "☾"}
       </button>
-    </div>
+      </div>
+      <SaveError />
+    </>
   );
 }
 
@@ -1832,7 +1835,6 @@ export function ComposableTreeEditorApp({
     <TreeEditorProvider {...providerProps}>
       <div className="page" dir="ltr">
         {showHeader && <TreeEditorHeader />}
-        <SaveError />
         <TreeActionErrors />
         <div className="content">
           <section className="left">
