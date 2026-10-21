@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tree Editor — מדריך אינטגרציה</title>
+<style>body{font:16px system-ui,Arial;max-width:940px;margin:30px auto;padding:0 20px;color:#172338;line-height:1.7;background:#f8fafc}h1,h2{color:#17335f}section{background:white;border:1px solid #dce3eb;padding:18px 24px;border-radius:12px;margin:18px 0}pre{direction:ltr;text-align:left;background:#15243b;color:white;padding:16px;overflow:auto;border-radius:8px;line-height:1.5}code{direction:ltr}li{padding:3px}aside{background:#e7f2ff;padding:12px;border-radius:8px}</style></head>
+<body><h1>Tree Editor — מדריך אינטגרציה</h1><p>איך להשתמש ברכיב הגנרי בתוך אפליקציית Next.js. מתייחס לענף tree-components-customActions.</p>
+<section><h2>1. התקנה</h2><pre>npm install github:Dudisl/tree-editor#tree-components-customActions</pre>
+<p>לאחר מיזוג לענף היציב, עדכן את ההפניה ל־commit/tag יציב. הגדר ב־next.config.js:</p>
+<pre>module.exports = { transpilePackages: ["tree-editor"] };</pre></section>
+<section><h2>2. איפה נמצא ה־JSON?</h2><p>ה־Host קובע היכן קובצי JSON מאוחסנים באמצעות ProjectAdapter. ה־TE מבקש את הפרויקט דרך API ואינו קורא דיסק מהדפדפן.</p>
+<pre>import path from "node:path";
+import { promises as fs } from "node:fs";
+import type { ProjectAdapter } from "tree-editor/server";
+
+const dir = path.join(process.cwd(), "storage", "models");
+
+export const adapter: ProjectAdapter = {
+  async listProjects() {
+    await fs.mkdir(dir, { recursive: true });
+    return (await fs.readdir(dir))
+      .filter(name => name.endsWith(".json"))
+      .map(name => name.slice(0, -5));
+  },
+  projectFilePath(project) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(project)) throw new Error("Invalid project");
+    return path.join(dir, project + ".json");
+  },
+  async ensureDataDir() { await fs.mkdir(dir, { recursive: true }); }
+};</pre>
+<p>אם ל־Host כבר יש Adapter, השתמש בו במקום ליצור חדש.</p></section>
+<section><h2>3. חיבור API לטעינה ושמירה</h2>
+<p>בקובץ app/api/treeEditor/tree/route.ts של ה־Host:</p>
+<pre>import { createTreeEditorRoutes } from "tree-editor/server";
+import { adapter } from "../../../../lib/treeEditorAdapter";
+export const { GET, POST } = createTreeEditorRoutes(adapter);</pre>
+<p>ה־TE קורא GET לטעינת פרויקט ו־POST לשמירתו. בסביבת Production חובה לבצע בדיקות הרשאה ב־Host.</p></section>
+<section><h2>4. הצגת העורך</h2>
+<pre>"use client";
+import { TreeEditorApp } from "tree-editor/client";
+export default function Page() {
+  return &lt;TreeEditorApp /&gt;;
+}</pre>
+<p>כך מקבלים תצוגת עץ, עריכה ושמירה דרך ה־API שחיברנו.</p></section>
+<section><h2>5. התאמת תצוגת JSON</h2>
+<pre>const uiConfig = {
+  treeKeys: ["children"],
+  captionFields: ["name", "targetOutcome", "id"],
+  fields: { targetOutcome: { label: "Outcome", order: 1 } }
+};
+&lt;TreeEditorApp uiConfig={uiConfig} /&gt;</pre>
+<p>אפשר להגדיר גם inlineKeys, typeColors, palette, longTextThreshold ועוד.</p></section>
+<section><h2>6. קריאת בחירת המשתמש</h2>
+<pre>&lt;TreeEditorApp onContextChange={(ctx) => {
+  console.log(ctx.project, ctx.document);
+  console.log(ctx.selectedPath, ctx.selectedNodeId);
+}} /&gt;</pre>
+<p>selectedPath הוא נתיב מבני בתוך ה־JSON, למשל ["children",0,"children",2]. כל מחרוזת היא מפתח באובייקט וכל מספר הוא אינדקס במערך.</p></section>
+<section><h2>7. הפעלת פעולות חיצוניות</h2>
+<pre>import { TreeEditorApp } from "tree-editor/client";
+import type { HandlerRequest, HandlerResult } from "tree-editor/client";
+
+const actions = [
+  { caption: "פירוק צומת", handlerName: "decompose" },
+  { caption: "יצירת תוכן", handlerName: "create" }
+];
+
+async function onAction(request: HandlerRequest): Promise&lt;HandlerResult&gt; {
+  const res = await fetch("/api/tree-actions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  if (!res.ok) return { success: false, error: "HTTP " + res.status };
+  return res.json();
+}
+
+&lt;TreeEditorApp actions={actions} onAction={onAction} /&gt;</pre>
+<p>onAction מקבל handlerName, project, nodePath. ה־Host מממש /api/tree-actions, מחליט איזה Handler להפעיל ושומר את תוצאתו. רק לאחר הצלחת ה־Handler ה־TE טוען את הפרויקט מחדש. לפני הפעלת ה־Handler ה־TE מאשר את שמירת המסמך.</p></section>
+<section><h2>8. רכיבים נפרדים — עבור עמוד מותאם</h2>
+<pre>import {
+  TreeEditorProvider, TreeEditorHeader,
+  TreeEditorTree, TreeEditorNodeForm
+} from "tree-editor/client";
+
+&lt;TreeEditorProvider uiConfig={uiConfig} actions={actions} onAction={onAction}&gt;
+  &lt;TreeEditorHeader /&gt;
+  &lt;div className="my-layout"&gt;
+    &lt;TreeEditorTree showToolbar /&gt;
+    &lt;TreeEditorNodeForm /&gt;
+  &lt;/div&gt;
+&lt;/TreeEditorProvider&gt;</pre>
+<p>OrgRefactor כבר משתמש במסלול הזה, ולכן אין צורך להחליף את המבנה הקיים. הוסף רק props חסרים.</p></section>
+<section><h2>9. בדיקת שימוש</h2><ol>
+<li>הרץ את ה־Host המקומי באמצעות npx next dev -p 3005 -H 127.0.0.1.</li>
+<li>בחר פרויקט וודא שה־JSON נטען.</li>
+<li>ערוך שדה, שמור וודא שהקובץ השתנה.</li>
+<li>בחר צומת, הפעל Action וודא שה־JSON המעודכן מופיע לאחר Reload.</li></ol>
+<aside>enableBackup ו־enableWireframe הן יכולות אופציונליות הדורשות מסלולי שרת נוספים ב־Host. ה־TE אינו מפעיל Python בעצמו; זה תפקיד ה־Host.</aside></section>
+</body></html>

@@ -1,4 +1,5 @@
 "use client";
+import TextAreaField from "./TextAreaField";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
@@ -497,15 +498,15 @@ function PrimField({ label, val, onChange, longTextThreshold = 80 }: { label: st
   return (
     <div className="field">
       <label>{label}</label>
-      {long ? <textarea rows={5} value={s} onChange={e => onChange(e.target.value)} /> : <input value={s} onChange={e => onChange(e.target.value)} onPaste={e => {
-        const pasted = e.clipboardData.getData("text/plain");
-        if (!/[\r\n]/.test(pasted)) return;
-        e.preventDefault();
-        const input = e.currentTarget;
-        const start = input.selectionStart ?? s.length;
-        const end = input.selectionEnd ?? start;
-        onChange(s.slice(0, start) + pasted.replace(/\r\n?/g, "\n") + s.slice(end));
-      }} />}
+      {long ? <TextAreaField value={s} onChange={onChange} /> : <input value={s} onChange={e => onChange(e.target.value)} onPaste={e => {
+          const pasted = e.clipboardData.getData("text/plain");
+          if (!/[\r\n]/.test(pasted)) return;
+          e.preventDefault();
+          const input = e.currentTarget;
+          const start = input.selectionStart ?? s.length;
+          const end = input.selectionEnd ?? start;
+          onChange(s.slice(0, start) + pasted.replace(/\r\n?/g, "\n") + s.slice(end));
+        }} />}
     </div>
   );
 }
@@ -1323,7 +1324,12 @@ export default function TreeEditorApp({
         </section>
 
         <section className="right">
-          <div className="card" onBlur={() => saveDoc()}>
+          <div className="card" onBlur={e => {
+            // Moving focus between form controls (including preview and direction
+            // buttons) must not trigger an unnecessary save request.
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            if (dirty) saveDoc();
+          }}>
             <h2>{breadcrumb}</h2>
             {rightPanel()}
             {selPath && selPath.length > 0 && (
