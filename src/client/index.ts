@@ -3,6 +3,7 @@ export type { TreeEditorAppProps } from "./StableTreeEditorApp";
 export { TreeEditorProvider } from "./TreeEditorComponents";
 export {
   TreeEditorHeader,
+  TreeEditorActionErrors,
   TreeEditorTree,
   TreeEditorNodeForm,
 } from "./TreeEditorComponents";
