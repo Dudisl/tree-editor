@@ -174,6 +174,72 @@ function setAt(root: JsonValue, path: Seg[], val: JsonValue): JsonValue {
   return root;
 }
 
+
+type ReselectOperation = "NEW" | "DEL" | "MOVE" | "ACTION";
+
+function reselectPath(
+  operation: ReselectOperation,
+  oldPath: Seg[],
+  oldDocument: JsonValue,
+  newDocument: JsonValue,
+  inlineKeys: string[],
+): Seg[] | null {
+  const exists = (p: Seg[]) => p.length > 0 && getAt(newDocument, p) !== undefined;
+  const parent = (p: Seg[]) => {
+    const next = p.slice(0, -1);
+    return typeof next[next.length - 1] === "string" && inlineKeys.includes(String(next[next.length - 1]))
+      ? next.slice(0, -1) : next;
+  };
+  const nearestParent = (p: Seg[]): Seg[] | null => {
+    let candidate = parent(p);
+    while (candidate.length && !exists(candidate)) candidate = parent(candidate);
+    return candidate.length ? candidate : null;
+  };
+  const oldNode = getAt(oldDocument, oldPath);
+  const matchingPaths: Seg[][] = [];
+  const visit = (node: JsonValue, p: Seg[]) => {
+    if (node === oldNode) matchingPaths.push(p);
+    if (node && typeof node === "object") {
+      for (const [key, value] of Object.entries(node)) {
+        if (value && typeof value === "object") visit(value as JsonValue, [...p, ...(Array.isArray(node) ? [Number(key)] : [key])]);
+      }
+    }
+  };
+
+  if (operation === "DEL") return nearestParent(oldPath);
+  if (operation === "NEW") {
+    const before = getAt(oldDocument, oldPath);
+    const after = getAt(newDocument, oldPath);
+    if (before && after && typeof before === "object" && typeof after === "object") {
+      for (const key of Object.keys(after)) {
+        const oldValue = (before as Record<string, JsonValue>)[key];
+        const newValue = (after as Record<string, JsonValue>)[key];
+        if (Array.isArray(oldValue) && Array.isArray(newValue) && newValue.length === oldValue.length + 1) {
+          return [...oldPath, key, newValue.length - 1];
+        }
+        if (!(key in before)) return [...oldPath, key];
+      }
+    }
+    return exists(oldPath) ? oldPath : nearestParent(oldPath);
+  }
+  if (operation === "MOVE") {
+    visit(newDocument, []);
+    if (matchingPaths.length === 1) return matchingPaths[0];
+  }
+  if (operation === "ACTION" && exists(oldPath)) {
+    const current = getAt(newDocument, oldPath);
+    if (oldNode && current && typeof oldNode === "object" && typeof current === "object" &&
+        !Array.isArray(oldNode) && !Array.isArray(current)) {
+      const a = oldNode as Record<string, JsonValue>;
+      const b = current as Record<string, JsonValue>;
+      const identity = ["id", "name", "title", "targetOutcome"].find(
+        key => typeof a[key] === "string" && a[key] !== "");
+      if (!identity || a[identity] === b[identity]) return oldPath;
+    } else if (oldNode === current) return oldPath;
+  }
+  return nearestParent(oldPath);
+}
+
 function delAt(root: JsonValue, path: Seg[]): JsonValue {
   if (!path.length) return root;
   const [h, ...rest] = path;
@@ -907,7 +973,23 @@ export function TreeEditorProvider({
     [authHeadersProp],
   );
 
-  const loadProject = useCallback(async (name?: string | null): Promise<boolean> => {
+  const reselect = useCallback((
+    operation: ReselectOperation, oldPath: Seg[], oldDocument: JsonValue, newDocument: JsonValue,
+  ) => {
+    const target = reselectPath(operation, oldPath, oldDocument, newDocument, cfg.inlineKeys);
+    setSelPath(target);
+    setSelId(target ? pathId(target) : null);
+    if (target) setExpanded(prev => {
+      const next = new Set(prev);
+      for (let i = 1; i <= target.length; i++) next.add(pathId(target.slice(0, i)));
+      return next;
+    });
+  }, [cfg.inlineKeys]);
+
+  const loadProject = useCallback(async (
+    name?: string | null,
+    selection?: { operation: ReselectOperation; path: Seg[]; document: JsonValue },
+  ): Promise<boolean> => {
     setLoaded(false);
     try {
       const params = new URLSearchParams();
@@ -931,10 +1013,10 @@ export function TreeEditorProvider({
         : available);
       setProject(active);
       setDoc(newDoc);
-      setSelPath(null);
-      setSelId(null);
       const initForest = buildForest(newDoc, new Set(), cfg);
       setExpanded(new Set(collectIds(initForest, 1)));
+      if (selection) reselect(selection.operation, selection.path, selection.document, newDoc);
+      else { setSelPath(null); setSelId(null); }
       setDirty(false);
       setReloadFailed(false);
       return true;
@@ -944,7 +1026,7 @@ export function TreeEditorProvider({
     } finally {
       setLoaded(true);
     }
-  }, [authHeaders, cfg]);
+  }, [authHeaders, cfg, reselect]);
 
   useEffect(() => { void loadProject(null); }, [loadProject]);
 
@@ -1003,7 +1085,7 @@ export function TreeEditorProvider({
           (result.error !== undefined && typeof result.error !== "string"))
         throw new Error("Invalid handler response");
       if (!result.success) throw new Error(result.error || "Action failed");
-      if (!await loadProject(request.project)) throw new Error("Reload failed");
+      if (!await loadProject(request.project, { operation: "ACTION", path: request.nodePath, document: docRef.current })) throw new Error("Reload failed");
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Action failed");
     } finally {
@@ -1138,6 +1220,7 @@ export function TreeEditorProvider({
     if (next !== null) {
       handleDocChange(next);
       saveDoc(next);
+      reselect("NEW", selPath, doc, next);
     }
   };
 
@@ -1146,18 +1229,7 @@ export function TreeEditorProvider({
     const next = delAt(doc, selPath);
     handleDocChange(next);
     saveDoc(next);
-    let parentPath = selPath.slice(0, -1);
-    const lastSeg = parentPath[parentPath.length - 1];
-    if (typeof lastSeg === "string" && cfg.inlineKeys.includes(lastSeg)) {
-      parentPath = parentPath.slice(0, -1);
-    }
-    if (parentPath.length) {
-      setSelPath(parentPath);
-      setSelId(pathId(parentPath));
-    } else {
-      setSelPath(null);
-      setSelId(null);
-    }
+    reselect("DEL", selPath, doc, next);
   };
 
   const moveUp = () => {
@@ -1168,7 +1240,7 @@ export function TreeEditorProvider({
     handleDocChange(n);
     saveDoc(n);
     const last = selPath[selPath.length - 1];
-    if (typeof last === "number") selectAndReveal([...selPath.slice(0, -1), last - 1]);
+    if (typeof last === "number") reselect("MOVE", selPath, doc, n);
   };
 
   const moveDown = () => {
@@ -1179,7 +1251,7 @@ export function TreeEditorProvider({
     handleDocChange(n);
     saveDoc(n);
     const last = selPath[selPath.length - 1];
-    if (typeof last === "number") selectAndReveal([...selPath.slice(0, -1), last + 1]);
+    if (typeof last === "number") reselect("MOVE", selPath, doc, n);
   };
 
   const expandAll = () => setExpanded(new Set(collectIds(forest, 999)));
@@ -1228,8 +1300,8 @@ export function TreeEditorProvider({
     setUndoDoc(snapshot);
     setDoc(result.doc);
     saveDoc(result.doc);
-    selectAndReveal(result.newPath);
-  }, [doc, selectAndReveal, saveDoc]);
+    reselect("MOVE", dragPath, doc, result.doc);
+  }, [doc, reselect, saveDoc]);
 
   const handleDrop = useCallback((targetPath: Seg[]) => {
     const dragPath = dragPathRef.current;
@@ -1258,8 +1330,8 @@ export function TreeEditorProvider({
     setUndoDoc(snapshot);
     setDoc(result.doc);
     saveDoc(result.doc);
-    selectAndReveal(result.newPath);
-  }, [doc, selectAndReveal, saveDoc, cfg]);
+    reselect("MOVE", dragPath, doc, result.doc);
+  }, [doc, reselect, saveDoc, cfg]);
 
   const handleDragEnd = useCallback(() => {
     dragPathRef.current = null;
