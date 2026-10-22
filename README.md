@@ -116,6 +116,101 @@ Example: only show `children` as tree hierarchy, keep everything else
 { "treeKeys": ["children"] }
 ```
 
+## Actions: delegate work to the host
+
+Actions let a user run a host-defined operation on the selected JSON node.
+Tree Editor **only handles UI, selection, saving and reloading**. The host
+owns the handler, permissions, file validation and the actual processing
+(Python, AI, an API call or any other service).
+
+Use `TreeEditorApp` with `actions` / `onAction`, or use the composable
+`TreeEditorProvider` when you want to place the header, tree and node form
+individually.
+
+```tsx
+"use client";
+
+import {
+  TreeEditorProvider,
+  TreeEditorHeader,
+  TreeEditorTree,
+  TreeEditorNodeForm,
+  type HandlerRequest,
+  type HandlerResult,
+} from "tree-editor/client";
+
+const actions = [
+  { caption: "Process selected node", handlerName: "process-node" },
+];
+
+async function onAction(request: HandlerRequest): Promise<HandlerResult> {
+  try {
+    const response = await fetch("/api/my-tree-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    const result = await response.json();
+    return response.ok
+      ? { success: true }
+      : { success: false, error: result.error ?? "Action failed" };
+  } catch {
+    return { success: false, error: "Network error" };
+  }
+}
+
+export default function Page() {
+  return (
+    <TreeEditorProvider actions={actions} onAction={onAction}>
+      <TreeEditorHeader />
+      <TreeEditorTree />
+      <TreeEditorNodeForm />
+    </TreeEditorProvider>
+  );
+}
+```
+
+**Action types (exported from `tree-editor/client`):**
+
+```ts
+type TreeAction = { caption: string; handlerName: string };
+type HandlerRequest = {
+  handlerName: string;
+  project: string;
+  nodePath: Array<string | number>;
+};
+type HandlerResult = { success: boolean; error?: string };
+```
+
+- `caption` is the label in the actions dropdown. `handlerName` is the
+  host-defined action identifier. The host can map it to a handler and
+  additional parameters via its own configuration.
+- `nodePath` is the **JSON document path**, e.g.
+  `["decompositionResult", "children", 0]`; it is not a dot-separated path,
+  a node ID or a file path. Paths depend on the document.
+- The dropdown is available when `actions` are supplied and a node is
+  selected. The editor calls `onAction(request)` with the active project
+  and selected node path.
+- Before invoking the handler, the editor saves pending edits. If save fails,
+  it does not invoke the handler.
+- On `{ success: true }`, the editor reloads the project via
+  `/api/treeEditor/tree` and reselects the original node if it still exists;
+  if removed, it selects the closest available parent. Changes made by the
+  handler must therefore be **persisted by the host before returning success**.
+- On `{ success: false, error: "..." }` (or a thrown error), an error is
+  displayed, and no successful-action reload takes place. The host should
+  return a meaningful error rather than silently succeeding.
+
+**Host responsibilities:** implement the action endpoint, validate the
+`project`, `handlerName` and `nodePath` server-side, authorize access,
+persist the updated document, and handle any backup/rollback requirements.
+Never treat the client-supplied path or handler identifier as trusted.
+Tree Editor does not know the host's Python engine or JSON schema.
+
+The generic editor does **not** require `decompositionResult` or an
+`output:` project name. Any such restrictions come from a particular
+host's action handler, not from the Tree Editor Actions interface.
+
 ## Consuming this package
 
 No npm registry needed — install straight from GitHub, pinned to a
