@@ -1857,7 +1857,7 @@ export function TreeEditorNodeForm() {
   );
 }
 
-function TreeActionErrors() {
+export function TreeEditorActionErrors() {
   const { actionError, reloadFailed, retryReload } = useTreeEditorState();
   if (!actionError && !reloadFailed) return null;
   return <div role="alert" style={{ padding: 12, background: "#fee2e2", color: "#991b1b" }}>
@@ -1914,7 +1914,7 @@ export function ComposableTreeEditorApp({
     <TreeEditorProvider {...providerProps}>
       <div className="page" dir="ltr">
         {showHeader && <TreeEditorHeader />}
-        <TreeActionErrors />
+        <TreeEditorActionErrors />
         <div className="content">
           <section className="left">
             <TreeEditorTree showToolbar={showToolbar} />
