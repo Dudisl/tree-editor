@@ -1028,7 +1028,14 @@ export function TreeEditorProvider({
     }
   }, [authHeaders, cfg, reselect]);
 
-  useEffect(() => { void loadProject(null); }, [loadProject]);
+  // Initial project load runs once. Recreating loadProject must not silently
+  // reload the tree and erase a selection made by NEW or ACTION.
+  const initialProjectLoad = useRef(false);
+  useEffect(() => {
+    if (initialProjectLoad.current) return;
+    initialProjectLoad.current = true;
+    void loadProject(null);
+  }, [loadProject]);
 
   const docRef = useRef<JsonValue>(doc);
   useEffect(() => { docRef.current = doc; }, [doc]);
