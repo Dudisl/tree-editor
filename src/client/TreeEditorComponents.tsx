@@ -1640,8 +1640,8 @@ export function TreeEditorHeader() {
     <>
       <div className="header">
       <h1>Tree Editor</h1>
-   {/*    <div className="project-picker" style={{ display: externallySelected ? "none" : undefined }}> */}
-    <div className="project-picker">
+      <div className="project-picker" style={{ display: externallySelected ? "none" : undefined }}> 
+    
         <label>
           <span>Project:</span>
           <select
