@@ -1041,11 +1041,6 @@ export function TreeEditorProvider({
     void loadProject(selectedProject ?? null);
   }, [loadProject, selectedProject]);
 
-  useEffect(() => {
-    if (!initialProjectLoad.current || !loaded || !selectedProject || selectedProject === project) return;
-    void loadProject(selectedProject);
-  }, [selectedProject, project, loaded, loadProject]);
-
   const docRef = useRef<JsonValue>(doc);
   useEffect(() => { docRef.current = doc; }, [doc]);
 
@@ -1082,6 +1077,20 @@ export function TreeEditorProvider({
     pendingSave.current = result;
     return result;
   }, [loaded, project, authHeaders]);
+
+  // Resolve pending edits before a host-initiated document switch.
+  useEffect(() => {
+    if (!initialProjectLoad.current || !loaded || !selectedProject || selectedProject === project) return;
+    let cancelled = false;
+    const switchFile = async () => {
+      const previousWritesCompleted = await pendingSave.current;
+      if (!previousWritesCompleted || cancelled) return;
+      if (dirty && !await saveDoc(docRef.current)) return;
+      if (!cancelled) await loadProject(selectedProject);
+    };
+    void switchFile();
+    return () => { cancelled = true; };
+  }, [selectedProject, project, loaded, dirty, saveDoc, loadProject]);
 
   const runAction = useCallback(async (handlerName: string) => {
     if (actionLock.current || reloadFailed || !onAction || !project || !selPath ||
