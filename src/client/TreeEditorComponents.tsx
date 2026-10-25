@@ -816,6 +816,8 @@ export type TreeEditorActionProps = {
 };
 
 export type TreeEditorProviderProps = BaseTreeEditorAppProps & TreeEditorActionProps & {
+  /** Optional external document selection. Uses the same loader as the built-in picker. */
+  selectedProject?: string;
   children: React.ReactNode;
 };
 
@@ -838,6 +840,7 @@ type StateValue = {
   selKind: VNode["kind"] | null;
   projects: string[];
   project: string | null;
+  externallySelected: boolean;
   loaded: boolean;
   keyInput: string;
   setKeyInput: React.Dispatch<React.SetStateAction<string>>;
@@ -895,6 +898,7 @@ export function TreeEditorProvider({
   enableBackup = false,
   uiConfig,
   onContextChange,
+  selectedProject,
   actions = [],
   onAction,
   children,
@@ -1034,8 +1038,13 @@ export function TreeEditorProvider({
   useEffect(() => {
     if (initialProjectLoad.current) return;
     initialProjectLoad.current = true;
-    void loadProject(null);
-  }, [loadProject]);
+    void loadProject(selectedProject ?? null);
+  }, [loadProject, selectedProject]);
+
+  useEffect(() => {
+    if (!initialProjectLoad.current || !loaded || !selectedProject || selectedProject === project) return;
+    void loadProject(selectedProject);
+  }, [selectedProject, project, loaded, loadProject]);
 
   const docRef = useRef<JsonValue>(doc);
   useEffect(() => { docRef.current = doc; }, [doc]);
@@ -1502,6 +1511,7 @@ export function TreeEditorProvider({
     selKind,
     projects,
     project,
+    externallySelected: selectedProject !== undefined,
     loaded,
     keyInput,
     setKeyInput,
@@ -1610,6 +1620,7 @@ export function TreeEditorHeader() {
   const {
     project,
     projects,
+    externallySelected,
     dirty,
     loadProject,
     createProject,
@@ -1620,7 +1631,7 @@ export function TreeEditorHeader() {
     <>
       <div className="header">
       <h1>Tree Editor</h1>
-      <div className="project-picker">
+      <div className="project-picker" style={{ display: externallySelected ? "none" : undefined }}>
         <label>
           <span>Project:</span>
           <select
