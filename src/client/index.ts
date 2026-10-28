@@ -16,4 +16,4 @@ export type {
   TreeEditorRelValue,
 } from "./TreeEditorApp";
 
-export type { JsonPath, TreeAction, HandlerRequest, HandlerResult, TreeEditorActionProps } from "./TreeEditorComponents";
+export type { JsonPath, TreeAction, HandlerRequest, HandlerResult, TreeEditorActionProps, PasteValidationRequest, PasteValidator } from "./TreeEditorComponents";
