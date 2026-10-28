@@ -815,7 +815,17 @@ export type TreeEditorActionProps = {
   onAction?: (request: HandlerRequest) => Promise<HandlerResult>;
 };
 
+export type PasteValidationRequest = {
+  sourceTree: string | null;
+  targetTree: string | null;
+  targetNode: unknown;
+  copiedNode: unknown;
+};
+export type PasteValidator = (request: PasteValidationRequest) => "NO" | JsonValue | Promise<"NO" | JsonValue>;
+
 export type TreeEditorProviderProps = BaseTreeEditorAppProps & TreeEditorActionProps & {
+  /** Optional host validation/transformation before insertion. "NO" rejects; JSON is inserted unchanged. */
+  validatePaste?: PasteValidator;
   /** Optional external document selection. Uses the same loader as the built-in picker. */
   selectedProject?: string;
   children: React.ReactNode;
@@ -825,7 +835,7 @@ export type TreeEditorTreeProps = {
   showToolbar?: boolean;
 };
 
-export type ComposableTreeEditorAppProps = BaseTreeEditorAppProps & TreeEditorActionProps & {
+export type ComposableTreeEditorAppProps = Omit<TreeEditorProviderProps, "children" | "selectedProject"> & {
   showHeader?: boolean;
   showToolbar?: boolean;
 };
@@ -861,6 +871,8 @@ type StateValue = {
   handleRenameKey: (newKey: string) => void;
   addRoot: () => void;
   addSub: () => void;
+  copyNode: () => void;
+  pasteNode: () => Promise<void>;
   removeNode: () => void;
   moveUp: () => void;
   moveDown: () => void;
@@ -901,6 +913,7 @@ export function TreeEditorProvider({
   selectedProject,
   actions = [],
   onAction,
+  validatePaste,
   children,
 }: TreeEditorProviderProps) {
   const cfg = useMemo(() => resolveUiConfig(uiConfig), [uiConfig]);
@@ -1249,6 +1262,73 @@ export function TreeEditorProvider({
     }
   };
 
+  const copyNode = () => {
+    if (!project || !selPath || selVal === undefined) return;
+    try {
+      window.sessionStorage.setItem("tree-editor-copied-node", JSON.stringify({
+        sourceTree: project,
+        node: selVal,
+      }));
+    } catch (error) {
+      window.alert("Copy failed: unable to access session clipboard");
+    }
+  };
+
+  const pasteNode = async () => {
+    if (!loaded || !project || !selPath || !doc) return;
+    let stored: { sourceTree: string | null; node: JsonValue };
+    try {
+      const raw = window.sessionStorage.getItem("tree-editor-copied-node");
+      if (!raw) { window.alert("Nothing copied"); return; }
+      stored = JSON.parse(raw);
+      if (!stored || !Object.prototype.hasOwnProperty.call(stored, "node")) throw new Error("Invalid clipboard");
+    } catch {
+      window.alert("Paste failed: invalid clipboard");
+      return;
+    }
+
+    try {
+      // Give the host isolated data so validation cannot mutate editor state.
+      const result = validatePaste
+        ? await validatePaste({
+            sourceTree: stored.sourceTree,
+            targetTree: project,
+            targetNode: JSON.parse(JSON.stringify(selVal)),
+            copiedNode: JSON.parse(JSON.stringify(stored.node)),
+          })
+        : stored.node;
+      if (result === "NO") return;
+      if (result === undefined) throw new Error("Validation returned undefined");
+      const pasted = JSON.parse(JSON.stringify(result)) as JsonValue;
+      let destinationPath: Seg[];
+      let next: JsonValue;
+      if (Array.isArray(selVal)) {
+        destinationPath = [...selPath, selVal.length];
+        next = setAt(doc, selPath, [...selVal, pasted]);
+      } else if (selVal !== null && typeof selVal === "object") {
+        const obj = selVal as Record<string, JsonValue>;
+        const inlineKey = cfg.inlineKeys.find(k => isTreeVisible(k, cfg) && Array.isArray(obj[k]));
+        const childrenKey = inlineKey ?? cfg.inlineKeys.find(k => isTreeVisible(k, cfg));
+        if (!childrenKey) { window.alert("No child array is configured for this tree"); return; }
+        const items = Array.isArray(obj[childrenKey]) ? obj[childrenKey] as JsonValue[] : [];
+        destinationPath = [...selPath, childrenKey, items.length];
+        next = setAt(doc, [...selPath, childrenKey], [...items, pasted]);
+        if (!inlineKey && !Array.isArray(obj[childrenKey])) {
+          next = setAt(doc, selPath, { ...obj, [childrenKey]: [pasted] });
+        }
+      } else {
+        window.alert("Select an object or array as the paste destination");
+        return;
+      }
+      setUndoDoc(doc);
+      handleDocChange(next);
+      await saveDoc(next);
+      selectAndReveal(destinationPath);
+    } catch (error) {
+      window.alert("Paste rejected: " + (error instanceof Error ? error.message : String(error)));
+    }
+  };
+
   const removeNode = () => {
     if (!selPath || !selPath.length) return;
     const next = delAt(doc, selPath);
@@ -1541,6 +1621,8 @@ export function TreeEditorProvider({
     handleRenameKey,
     addRoot,
     addSub,
+    copyNode,
+    pasteNode,
     removeNode,
     moveUp,
     moveDown,
@@ -1698,6 +1780,8 @@ export function TreeEditorTree({ showToolbar = true }: TreeEditorTreeProps = {})
     handleToggle,
     addRoot,
     addSub,
+    copyNode,
+    pasteNode,
     moveUp,
     moveDown,
     removeNode,
@@ -1724,6 +1808,8 @@ export function TreeEditorTree({ showToolbar = true }: TreeEditorTreeProps = {})
           )}
           <button onClick={addRoot}>+ Root</button>
           <button onClick={addSub} disabled={!selId || selKind === "prim"}>+ Child</button>
+          <button onClick={copyNode} disabled={!selId}>Copy</button>
+          <button onClick={() => void pasteNode()} disabled={!selId || selKind === "prim"}>Paste as Child</button>
           <button onClick={moveUp} disabled={!selId}>↑</button>
           <button onClick={moveDown} disabled={!selId}>↓</button>
           <button onClick={removeNode} disabled={!selId}>🗑</button>
